@@ -30,7 +30,7 @@ export function ExecutionSettings({ value, onChange, disabled = false }: { value
       <TaskPropertyPicker ariaLabel="推理强度" value={value.reasoningEffort ?? ""} disabled={disabled || !selected || loading}
         open={openPicker === "effort"} onOpenChange={open => setOpenPicker(open ? "effort" : null)}
         options={[{ value: "", label: selected ? "模型默认" : "沿用 Codex 会话" }, ...(selected?.supportedReasoningEfforts.map(item => ({ value: item.reasoningEffort, label: `${LABELS[item.reasoningEffort] || item.reasoningEffort} · ${item.reasoningEffort}` })) ?? [])]}
-        onChange={effort => onChange({ ...value, reasoningEffort: effort || null })} />
+        onChange={effort => onChange({ model: value.model, reasoningEffort: effort || null })} />
     </div>
     {loading && <small>正在读取可用模型…</small>}
     {error && <div className="model-load-error" role="status">{error} <button type="button" onClick={() => setAttempt(value => value + 1)}>重试</button></div>}
