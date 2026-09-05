@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!--
+      The frozen Python sidecar bundles libpython3.13.dylib.  PyInstaller
+      signs that dylib with its own (or an ad-hoc) identity, so the hardened
+      runtime's Team ID check would otherwise reject it when the sidecar is
+      launched from the signed app bundle.  Keep the hardened runtime and
+      scope this exception to library validation only.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

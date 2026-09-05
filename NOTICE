@@ -1,0 +1,22 @@
+Codex Taskboard
+
+This project is distributed under the Apache License, Version 2.0; see
+LICENSE.
+
+Portions of the React UI structure, stylesheet, SVG assets, Codex CDP
+injection flow, and desktop packaging approach were copied from or adapted
+from:
+
+  chuspeeism/dashi-taskboard
+  https://github.com/chuspeeism/dashi-taskboard
+
+The referenced project is Copyright its contributors and is licensed under
+Apache-2.0. This notice does not imply that the two projects share data,
+runtime state, Taskboard Skills, or cloud services. Codex Taskboard's v1
+implementation intentionally keeps the original project's surrounding cloud,
+CLI, Skill, Jira, and multi-user features out of scope.
+
+The application icon (src-tauri/icons/icon.png and icon.icns) is reused
+from the installed OpenAI Codex desktop application. OpenAI retains the
+rights to its artwork and trademarks; these assets are not licensed under
+this project's Apache-2.0 code license. No OpenAI endorsement is implied.
