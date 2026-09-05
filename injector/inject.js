@@ -631,6 +631,13 @@
     if (!message || typeof message !== "object" || message.capability !== frameCapability) return;
     if (message.type === "taskboard:frame-awaiting-challenge") { postFrameChallenge(); return; }
     if (!frameChallenge || message.challenge !== frameChallenge) return;
+    if (message.type === "taskboard:thread-available") {
+      const thread = message.payload?.thread;
+      if (thread && typeof thread.id === "string" && typeof thread.cwd === "string") {
+        window.postMessage({ type: "mcp-notification", hostId: "local", method: "thread/started", params: { thread } }, window.location.origin);
+      }
+      return;
+    }
     if (message.type === "taskboard:drag-region") {
       updateDragRegion(message.payload);
       return;

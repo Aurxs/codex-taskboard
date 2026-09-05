@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
-  const page = await browser.newPage();
+  const page = await browser.newPage({ viewport: { width: 1440, height: 800 } });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
@@ -20,9 +20,14 @@ try {
       return route.fulfill({ headers, json: { projects } });
     }
     if (url.pathname === '/api/events') return route.fulfill({ headers, contentType: 'text/event-stream', body: ': ready\n\n' });
-    if (url.pathname.startsWith('/api/')) return route.fulfill({ headers, json: { tasks: [] } });
+    if (url.pathname.startsWith('/api/')) return route.fulfill({ headers, json: { tasks: [
+      ['整理下一版需求', 'todo', 'high', '明确任务边界与验收条件，准备交给 Codex。'],
+      ['补全执行记录', 'in_progress', 'high', '展示工具调用和过程反馈，让执行进展清晰可见。'],
+      ['优化任务详情布局', 'in_review', 'medium', '属性、依赖与执行记录集中展示，等待确认结果。'],
+      ['完善项目切换', 'done', 'low', '在多个本地项目之间切换并保留当前选择。'],
+    ].map(([title, status, priority, description], i) => ({ id: `demo-${i}`, projectId: 'db-1', identifier: `TASK-${i + 1}`, title, status, priority, description, version: 1, blockedBy: [], blocks: [], ready: true, runState: status === 'in_progress' ? 'running' : null })) } });
     if (url.pathname.startsWith('/assets/')) return route.fulfill({ headers, path: `dist/web${url.pathname}` });
-    return route.fulfill({ contentType: 'text/html', body: '<iframe sandbox="allow-scripts" style="width:1200px;height:760px;border:0"></iframe>' });
+    return route.fulfill({ contentType: 'text/html', body: '<body style="margin:0"><iframe sandbox="allow-scripts" style="width:1440px;height:800px;border:0"></iframe>' });
   });
   await page.goto('http://127.0.0.1:47825/');
   await page.evaluate(projects => {
@@ -54,8 +59,11 @@ try {
   await page.waitForTimeout(1500);
   await ui.getByRole('button', { name: '切换项目', exact: true }).click();
   assert.equal(await ui.getByRole('menuitemradio').count(), 4, 'explicit remote project is excluded');
+  await ui.getByRole('menuitemradio', { name: names[1], exact: true }).click();
   assert.deepEqual(errors, []);
   await mkdir('output/playwright', { recursive: true });
-  await page.screenshot({ path: 'output/playwright/project-ui.png' });
+  const boardBounds = await ui.locator('.board-scroll').evaluate(el => ({ width: el.clientWidth, contentWidth: el.scrollWidth }));
+  assert.equal(boardBounds.width, boardBounds.contentWidth, 'four columns fit the wide viewport without cropping');
+  await page.locator('iframe').screenshot({ path: 'output/playwright/project-ui.png' });
   console.log('passed: real React bundle in opaque iframe, slow sync, repeated context, five projects, switching, empty context fallback, remote exclusion');
 } finally { await browser.close(); }

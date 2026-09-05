@@ -356,6 +356,11 @@ def create_app(
     @app.get("/api/tasks/{task_id}")
     async def task_detail(task_id: str) -> dict[str, Any]:
         task = db.get_task(task_id)
+        try:
+            await scheduler.hydrate_activity(task)
+        except Exception:
+            task["activityError"] = "暂时无法读取 Codex 历史，以下为本地保存的记录。"
+        task["activity"] = db.list_activity(task_id)
         task["runs"] = db.list_runs(task_id)
         task["interactions"] = db.list_interactions(task_id)
         return task

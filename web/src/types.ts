@@ -105,10 +105,13 @@ export interface Task extends ExecutionOptions {
   updatedAt: string;
   interactions?: Interaction[];
   activity?: ActivityItem[];
+  activityError?: string;
   runs?: TaskRun[];
 }
 
 export interface TaskRun {
+  runState?: string;
+  lastOutputSummary?: string | null;
   id?: string;
   taskId?: string;
   threadId?: string | null;
@@ -122,6 +125,7 @@ export interface TaskRun {
 }
 
 export interface ActivityItem {
+  status?: string;
   id?: string;
   kind: string;
   message?: string;

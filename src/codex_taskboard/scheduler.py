@@ -202,6 +202,8 @@ class Scheduler:
         self._manual_overrides: set[str] = set()
         self._start_lock = asyncio.Lock()
         self._recovered = False
+        self._activity_hydrated: set[str] = set()
+        self._activity_lock = asyncio.Lock()
 
     @property
     def running(self) -> bool:
@@ -535,6 +537,41 @@ class Scheduler:
             if not self.server.running:
                 await self.server.start()
 
+    def _record_item(self, task_id: str, turn_id: str, item: dict[str, Any],
+                     completed: bool, created_at: str | None = None) -> None:
+        kind = item.get("type", "")
+        if kind in {"userMessage", "reasoning"} or not item.get("id"):
+            return
+        message = item.get("text") or item.get("command") or item.get("tool") or item.get("query") or kind
+        self.db.save_activity(task_id, {
+            "id": f"{turn_id}:{item['id']}", "kind": kind,
+            "message": str(message) if kind != "agentMessage" or item.get("text") else "正在回复…",
+            "status": "completed" if completed else "running", "data": item,
+            **({"createdAt": created_at} if created_at else {}),
+        })
+
+    async def hydrate_activity(self, task: dict[str, Any]) -> None:
+        """Read retained history once per process without starting or resuming a turn."""
+        if not task["threadId"] or task["id"] in self._activity_hydrated:
+            return
+        async with self._activity_lock:
+            if task["id"] in self._activity_hydrated:
+                return
+            await self._ensure_server()
+            snapshot = await self.server.read_thread(task["threadId"], include_turns=True)
+            thread = snapshot.get("thread", {})
+            existing = {entry["id"] for entry in self.db.list_activity(task["id"])}
+            for turn in thread.get("turns", []):
+                created_at = task["createdAt"]
+                if isinstance(turn.get("startedAt"), (int, float)):
+                    created_at = datetime.fromtimestamp(turn["startedAt"], timezone.utc).isoformat(timespec="milliseconds")
+                for item in turn.get("items", []):
+                    if f"{turn.get('id', '')}:{item.get('id')}" in existing:
+                        continue
+                    self._record_item(task["id"], turn.get("id", ""), item,
+                                      turn.get("status") != "inProgress", created_at)
+            self._activity_hydrated.add(task["id"])
+
     async def list_models(self) -> list[dict[str, Any]]:
         await self._ensure_server()
         return await self.server.list_models()
@@ -609,15 +646,6 @@ class Scheduler:
                 thread_id = await self.server.start_thread(project["workspacePath"])
                 self.server.register_thread_task(thread_id, task_id)
                 task = await self._set_task(task_id, thread_id=thread_id) or self.db.get_task(task_id)
-                try:
-                    await self.server.set_thread_name(thread_id, f"[{task['identifier']}] {task['title']}")
-                except Exception as exc:
-                    await self.events.publish(
-                        "run.event",
-                        project_id=task["projectId"],
-                        task_id=task_id,
-                        payload={"kind": "warning", "message": f"thread/name/set failed: {exc}"},
-                    )
             else:
                 self.server.register_thread_task(thread_id, task_id)
                 if resuming:
@@ -637,6 +665,17 @@ class Scheduler:
             options = await self.execution_options(task.get("model"), task.get("reasoningEffort"))
             turn_id = await self.server.start_turn(thread_id, prompt, task_id=task_id, **options)
             self._register_turn(task_id, turn_id)
+            try:
+                await self.server.set_thread_name(thread_id, f"[Taskboard]{task['title']}")
+            except Exception as exc:
+                self.db.save_activity(task_id, {"id": f"{turn_id}:title-warning", "kind": "warning",
+                                                "message": f"会话标题同步失败：{exc}"})
+            try:
+                snapshot = await self.server.read_thread(thread_id, include_turns=False)
+                await self.events.publish("thread.available", project_id=task["projectId"], task_id=task_id,
+                                          payload=snapshot)
+            except Exception:
+                pass
             run = self.db.create_run(
                 task_id=task_id,
                 thread_id=thread_id,
@@ -892,6 +931,8 @@ class Scheduler:
             )
             self.kick()
         elif task_id:
+            if method in {"item/started", "item/completed"}:
+                self._record_item(task_id, turn_id or "", params.get("item", {}), method == "item/completed")
             await self.events.publish(
                 "run.event",
                 project_id=project_id,

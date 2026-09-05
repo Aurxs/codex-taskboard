@@ -125,6 +125,7 @@ function normalizeTask(value: unknown): Task {
     createdAt: String(item.createdAt ?? new Date().toISOString()),
     updatedAt: String(item.updatedAt ?? new Date().toISOString()),
     interactions: Array.isArray(item.interactions) ? item.interactions as Interaction[] : undefined,
+    activityError: typeof item.activityError === "string" ? item.activityError : undefined,
     activity: Array.isArray(item.activity ?? item.runEvents ?? item.events)
       ? (item.activity ?? item.runEvents ?? item.events) as Task["activity"]
       : undefined,

@@ -13,6 +13,7 @@ try {
   let syncs = 0;
   let submitted = null;
   const tasks = Array.from({ length: 16 }, (_, i) => ({ id: `task-${i}`, projectId: 'db-0', identifier: `CODEX-TASKBOARD-${i + 1}`, title: `前置任务 ${i + 1}`, description: '', status: 'todo', priority: 'none', version: 1, blockedBy: [], blocks: [], ready: true }));
+  tasks[0].activity = Array.from({ length: 15 }, (_, i) => ({ id: `event-${i}`, kind: i === 1 ? 'mcpToolCall' : 'agentMessage', message: i === 1 ? 'imagegen' : `过程反馈 ${i + 1}：${'这是一段应当自动换行且不挤压时间的执行进展。'.repeat(6)}`, status: 'completed', createdAt: new Date(Date.now() - 120000).toISOString(), ...(i === 1 ? { data: { tool: 'imagegen', arguments: { prompt: '一棵树' } } } : {}) }));
   tasks.push({ ...tasks[0], id: 'canceled-1', identifier: 'CANCELED-1', title: '已取消的示例任务', status: 'canceled' });
   await page.route('http://127.0.0.1:47825/**', async route => {
     const url = new URL(route.request().url());
@@ -128,6 +129,15 @@ try {
   await ui.locator('.issue-properties').waitFor();
   const alignment = await ui.locator('.issue-detail-main').evaluate(el => ['.issue-title-input', '.issue-description-read', '.activity-heading'].map(selector => el.querySelector(selector).getBoundingClientRect().left));
   assert.ok(Math.max(...alignment) - Math.min(...alignment) < 2, `detail alignment: ${alignment}`);
+  assert.equal(await ui.locator('.activity-entry').count(), 15, 'history is not truncated to 12 entries');
+  await ui.getByText('查看调用详情', { exact: true }).click();
+  await ui.locator('.activity-content pre').waitFor();
+  for (const width of [1200, 600]) {
+    await page.evaluate(width => { document.querySelector('iframe').style.width = `${width}px`; }, width);
+    const times = await ui.locator('.activity-entry time').evaluateAll(elements => elements.map(el => ({ height: el.getBoundingClientRect().height, nowrap: getComputedStyle(el).whiteSpace })));
+    assert.ok(times.every(time => time.nowrap === 'nowrap' && time.height <= 25));
+  }
+  await page.evaluate(() => { document.querySelector('iframe').style.width = '1200px'; });
   await page.screenshot({ path: 'output/playwright/task-detail.png' });
   assert.deepEqual(errors, []);
   console.log('passed: floating pickers, no composer reflow, keyboard/outside dismissal, narrow bounds, canceled populated/empty/close, model/dependency submission');

@@ -12056,3 +12056,19 @@ kbd {
 .composer-properties .task-property-trigger { width: 100%; }
 .taskboard-popover .dependency-picker-list { max-height: 220px; }
 .other-tasks-panel.is-open { visibility: visible; pointer-events: auto; }
+
+/* Execution text can grow without squeezing the timestamp. */
+.app-shell .activity-entry { display: grid; grid-template-columns: 32px minmax(0, 1fr) max-content; align-items: start; gap: 10px; padding: 10px 0; }
+.app-shell .activity-entry time { white-space: nowrap; font-size: 11px; line-height: 24px; min-width: 62px; text-align: right; }
+.app-shell .activity-entry time::before { content: none; }
+.activity-content { min-width: 0; }
+.activity-content p { white-space: pre-wrap; }
+.activity-content details { margin-top: 6px; color: var(--text-secondary); font-size: 12px; }
+.activity-content summary { cursor: pointer; }
+.activity-content pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; background: var(--surface-muted); border-radius: 6px; }
+.app-shell .other-tasks-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 30px #00000012; }
+.app-shell .other-tasks-header { border: 0; padding: 16px; }
+.app-shell .other-tasks-list { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 12px; background: none; }
+.app-shell .other-tasks-list .task-card { min-height: 0; padding: 12px; border: 0; box-shadow: none; background: none; }
+.app-shell .other-tasks-list .task-card:hover { background: var(--surface-muted); }
+.app-shell .other-tasks-list .task-card::before, .app-shell .other-tasks-list .task-card::after { display: none; }

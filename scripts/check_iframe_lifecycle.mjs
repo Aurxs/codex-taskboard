@@ -26,6 +26,8 @@ try {
     assert.ok(frame, 'target frame exists');
     await cdp.send('Page.setDocumentContent', { frameId: frame.id, html: `<html><body><h1>Taskboard harness</h1><script>
       const capability = ${JSON.stringify(request.frameCapability)};
+      window.testCapability = capability;
+      addEventListener('message', e => { if(e.data.type === 'taskboard:frame-challenge') window.testChallenge = e.data.payload.challenge; });
       addEventListener('message', e => { if(e.data.type === 'taskboard:frame-challenge') parent.postMessage({type:'taskboard:ready',capability,challenge:e.data.payload.challenge},'*'); });
       parent.postMessage({type:'taskboard:frame-awaiting-challenge',capability},'*');
       </script><img src="http://127.0.0.1:47825/slow.svg"></body></html>` });
@@ -57,6 +59,11 @@ try {
   await page.waitForTimeout(700);
   assert.deepEqual(await visible(), { ready: true, visible: true }, 'close and reopen remain visible');
   assert.equal(loads, 2, 'reopen reuses connected frame');
+  await page.evaluate(() => { window.notifications = []; addEventListener('message', e => { if (e.data.type === 'mcp-notification') window.notifications.push(e.data); }); });
+  const child = page.frames().find(frame => frame.parentFrame());
+  await child.evaluate(() => parent.postMessage({ type: 'taskboard:thread-available', capability: testCapability, challenge: testChallenge, payload: { thread: { id: 'thread-test', cwd: '/tmp/project', name: '[Taskboard]测试' } } }, '*'));
+  await page.waitForFunction(() => window.notifications.length === 1);
+  assert.equal(await page.evaluate(() => window.notifications[0].params.thread.name), '[Taskboard]测试');
   console.log('passed: repeated open, delayed load, surface recovery, close/reopen');
 } finally {
   await browser.close();

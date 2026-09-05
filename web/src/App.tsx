@@ -226,6 +226,8 @@ function EmbeddedTaskboard() {
   const [dropTarget, setDropTarget] = useState<TaskStatus | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
   const noticeId = useRef(0);
+  const selectedTaskIdRef = useRef(selectedTaskId);
+  selectedTaskIdRef.current = selectedTaskId;
   const dragRegionRef = useRef<HTMLDivElement>(null);
   // Depend on project values, not the once-per-second host envelope identity.
   const projectContextKey = JSON.stringify({ projects: hostContext?.projects ?? [], projectId: hostContext?.projectId ?? null, workspacePath: hostContext?.workspacePath ?? null });
@@ -323,7 +325,10 @@ function EmbeddedTaskboard() {
     try {
       const loaded = await listTasks(projectId, true);
       setTasks(loaded);
-      setDetail((current) => current ? loaded.find((task) => task.id === current.id) ?? current : null);
+      if (selectedTaskIdRef.current) {
+        const next = await getTask(selectedTaskIdRef.current);
+        setDetail(current => current?.id === next.id ? next : current);
+      }
     } catch (error) {
       notify(compactError(error), "error");
     } finally {
@@ -338,11 +343,16 @@ function EmbeddedTaskboard() {
   }, [refreshTasks, selectedProjectId]);
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const close = createEventStream((event: EventEnvelope) => {
+      if (event.type === "thread.available") postEmbeddedHostMessage({ type: "taskboard:thread-available", payload: event.payload });
       if (event.projectId && selectedProjectId && event.projectId !== selectedProjectId) return;
-      void refreshTasks(selectedProjectId);
+      if (!timer) timer = setTimeout(() => {
+        timer = undefined;
+        void refreshTasks(selectedProjectId);
+      }, 200);
     });
-    return close;
+    return () => { close(); clearTimeout(timer); };
   }, [refreshTasks, selectedProjectId]);
 
   const updateTaskInState = useCallback((next: Task) => {
@@ -464,7 +474,7 @@ function EmbeddedTaskboard() {
     });
   }, [includeCanceled, search, tasks]);
   const grouped = useMemo(() => Object.fromEntries(COLUMN_ORDER.map((status) => [status, visibleTasks.filter((task) => task.status === status)])) as Record<TaskStatus, Task[]>, [visibleTasks]);
-  const appShellStyle = { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px`, "--main-column-count": 4 } as CSSProperties;
+  const appShellStyle = { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px`, "--main-column-count": 4, "--main-board-min-width": "1272px", "--main-board-max-width": "1672px" } as CSSProperties;
 
   return (
     <div className="app-shell embedded" style={appShellStyle}>

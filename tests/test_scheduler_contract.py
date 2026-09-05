@@ -148,6 +148,38 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
         self.server.register_thread_task(thread_id, task["id"])
         return self.db.get_task(task["id"])
 
+    async def test_activity_keeps_feedback_and_tools_without_duplicate_completion(self):
+        task = self.running_task(self.project())
+        for method, item in [
+            ("item/started", {"id": "tool-1", "type": "mcpToolCall", "tool": "imagegen", "arguments": {"prompt": "draw a tree"}}),
+            ("item/completed", {"id": "tool-1", "type": "mcpToolCall", "tool": "imagegen", "result": {"text": "done"}}),
+            ("item/completed", {"id": "reply-1", "type": "agentMessage", "text": "图片已生成", "phase": "commentary"}),
+            ("item/completed", {"id": "private-1", "type": "reasoning", "text": "private"}),
+        ]:
+            await self.scheduler._handle_notification(method, {"threadId": "thread-1", "turnId": "turn-1", "item": item})
+        rows = self.db.list_activity(task["id"])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["status"], "completed")
+        self.assertEqual(rows[0]["data"]["arguments"], {"prompt": "draw a tree"})
+        self.assertEqual(rows[1]["message"], "图片已生成")
+        reopened = Database(self.db.path)
+        try:
+            self.assertEqual(reopened.list_activity(task["id"]), rows)
+        finally:
+            reopened.close()
+
+    async def test_history_read_restores_items_without_executing_turn(self):
+        task = self.running_task(self.project())
+        self.server.read_snapshots["thread-1"] = {"thread": {"turns": [{"id": "old-turn", "status": "completed", "items": [
+            {"id": "old-feedback", "type": "agentMessage", "text": "之前的进展"},
+            {"id": "old-tool", "type": "commandExecution", "command": "pwd"},
+        ]}]}}
+        await self.scheduler.hydrate_activity(task)
+        await self.scheduler.hydrate_activity(task)
+        self.assertEqual(len(self.db.list_activity(task["id"])), 2)
+        self.assertEqual(self.server.turn_calls, [])
+        self.assertEqual(self.server.resume_calls, [])
+
     async def test_completion_review_policy_and_independent_dispatch(self) -> None:
         review_project = self.project("REVIEW", review_required=True)
         task = self.running_task(review_project, title="needs review")
@@ -251,7 +283,9 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
         project = self.project("PROMPT", review_required=False)
         initial = self.task(project["id"], "initial")
         initial = self.db.claim_task(initial["id"], initial["version"])
-        await self.scheduler._execute_task(initial["id"], None)
+        with patch.object(self.server, "set_thread_name", new_callable=AsyncMock) as rename:
+            await self.scheduler._execute_task(initial["id"], None)
+            rename.assert_awaited_once_with("thread-new-1", "[Taskboard]initial")
         self.assertEqual(
             self.server.turn_calls[0],
             (

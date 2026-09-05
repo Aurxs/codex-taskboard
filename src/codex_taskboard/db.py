@@ -23,7 +23,7 @@ from typing import Any, Iterator
 from .constants import ALL_PRIORITIES, ALL_STATUSES, Priority, TaskStatus
 from .errors import ConflictError, NotFoundError, ValidationError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _UNSET = object()
 _KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 _KEY_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_-]+")
@@ -201,6 +201,13 @@ class Database:
             self._conn.execute("ALTER TABLE tasks ADD COLUMN reasoning_effort TEXT")
             self._conn.execute("UPDATE schema_meta SET version = 3 WHERE singleton = 1")
             current = 3
+        if current < 4:
+            self._conn.execute("""CREATE TABLE task_activity (
+                task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                id TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL,
+                PRIMARY KEY (task_id, id))""")
+            self._conn.execute("UPDATE schema_meta SET version = 4 WHERE singleton = 1")
+            current = 4
         if current != SCHEMA_VERSION:
             raise RuntimeError(f"No migration path from schema {current}")
 
@@ -603,6 +610,27 @@ class Database:
     def get_task(self, task_id: str) -> dict[str, Any]:
         with self._lock:
             return self._task_json_locked(task_id)
+
+    def save_activity(self, task_id: str, item: dict[str, Any]) -> None:
+        with self._lock:
+            existing = self._conn.execute("SELECT payload FROM task_activity WHERE task_id = ? AND id = ?",
+                                          (task_id, item["id"])).fetchone()
+            if existing:
+                previous = json.loads(existing["payload"])
+                item = {**item, "data": {**previous.get("data", {}), **item.get("data", {})}}
+            self._conn.execute(
+                """INSERT INTO task_activity(task_id, id, payload, created_at) VALUES (?, ?, ?, ?)
+                ON CONFLICT(task_id, id) DO UPDATE SET payload = excluded.payload""",
+                (task_id, item["id"], _json(item), item.get("createdAt") or utc_now()),
+            )
+
+    def list_activity(self, task_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT payload, created_at FROM task_activity WHERE task_id = ? ORDER BY created_at, rowid",
+                (task_id,),
+            ).fetchall()
+            return [{**json.loads(row["payload"]), "createdAt": row["created_at"]} for row in rows]
 
     def get_task_row(self, task_id: str) -> sqlite3.Row:
         with self._lock:
