@@ -297,9 +297,23 @@ class CodexAppServer:
         return await self.request("thread/resume", {"threadId": thread_id}, timeout=30)
 
     async def set_thread_name(self, thread_id: str, name: str) -> Any:
-        return await self.request(
-            "thread/name/set", {"threadId": thread_id, "name": name}, timeout=20
-        )
+        # turn/start can return before the new rollout's metadata is flushed.
+        # Renaming is idempotent; retry only this known persistence race.
+        delays = (0.25, 0.5, 1.0, 2.0)
+        for attempt in range(len(delays) + 1):
+            try:
+                return await self.request(
+                    "thread/name/set", {"threadId": thread_id, "name": name}, timeout=20
+                )
+            except RpcFailure as exc:
+                message = str(exc)
+                if not (
+                    "failed to read session metadata" in message
+                    and "rollout at " in message
+                    and " is empty" in message
+                ) or attempt == len(delays):
+                    raise
+                await asyncio.sleep(delays[attempt])
 
     async def read_thread(self, thread_id: str, *, include_turns: bool = True) -> Any:
         return await self.request(

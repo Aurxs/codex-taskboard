@@ -4,9 +4,9 @@ import sys
 import textwrap
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, call, patch
 
-from codex_taskboard.app_server import CodexAppServer, default_command, usage_error_info
+from codex_taskboard.app_server import CodexAppServer, RpcFailure, default_command, usage_error_info
 
 
 FAKE_JSONL_SERVER = textwrap.dedent(
@@ -48,6 +48,36 @@ FAKE_JSONL_SERVER = textwrap.dedent(
 
 
 class AppServerProtocolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_thread_name_retries_empty_rollout_until_metadata_is_ready(self) -> None:
+        server = CodexAppServer()
+        failure = RpcFailure(-32603, "failed to read session metadata /tmp/rollout.jsonl: "
+                             "rollout at /tmp/rollout.jsonl is empty")
+        with patch.object(server, "request", AsyncMock(side_effect=[failure, failure, {}])) as request, patch(
+            "codex_taskboard.app_server.asyncio.sleep", new_callable=AsyncMock
+        ) as sleep:
+            self.assertEqual(await server.set_thread_name("thread-1", "[Taskboard]标题"), {})
+            self.assertEqual(request.await_args_list, [
+                call("thread/name/set", {"threadId": "thread-1", "name": "[Taskboard]标题"}, timeout=20)
+            ] * 3)
+            self.assertEqual(sleep.await_args_list, [call(0.25), call(0.5)])
+
+    async def test_thread_name_retry_is_bounded_and_other_errors_are_not_retried(self) -> None:
+        for message, attempts in [
+            ("failed to read session metadata /tmp/r: rollout at /tmp/r is empty", 5),
+            ("permission denied", 1),
+        ]:
+            with self.subTest(message=message):
+                server = CodexAppServer()
+                failure = RpcFailure(-32603, message)
+                with patch.object(server, "request", AsyncMock(side_effect=failure)) as request, patch(
+                    "codex_taskboard.app_server.asyncio.sleep", new_callable=AsyncMock
+                ) as sleep:
+                    with self.assertRaises(RpcFailure) as raised:
+                        await server.set_thread_name("thread-1", "title")
+                    self.assertIs(raised.exception, failure)
+                    self.assertEqual(request.await_count, attempts)
+                    self.assertEqual(sleep.await_count, attempts - 1)
+
     def test_default_command_prefers_installed_codex_app_bundle(self) -> None:
         with patch.dict(
             "os.environ",
