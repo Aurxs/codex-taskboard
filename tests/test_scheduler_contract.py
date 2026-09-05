@@ -307,6 +307,7 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
                 initial["id"],
             ),
         )
+        self.assertIn("完成任务前，必须提交本次任务产生的改动。", self.server.turn_calls[0][1])
 
         failed = self.running_task(project, title="failed retry", thread_id="thread-retry", state=RunState.FAILED.value)
         spawn = Mock()
