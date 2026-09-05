@@ -2827,12 +2827,15 @@ kbd {
 }
 
 .issue-parent-link {
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   min-height: 28px;
   gap: 7px;
   margin: -2px 0 4px;
+  background: var(--bg);
   color: var(--text-tertiary);
   font-size: 11px;
 }
