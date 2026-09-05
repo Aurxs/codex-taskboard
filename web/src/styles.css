@@ -32,6 +32,7 @@
   --priority-medium: var(--text-tertiary);
   --priority-low: var(--text-tertiary);
   --priority-none: var(--text-tertiary);
+  --priority-draft: var(--text-tertiary);
   --status-backlog: #9e9ea1;
   --status-todo: #9e9ea1;
   --status-progress: #f0bf00;
@@ -12075,3 +12076,36 @@ kbd {
 .app-shell .other-tasks-list .task-card { min-height: 0; padding: 12px; border: 0; box-shadow: none; background: none; }
 .app-shell .other-tasks-list .task-card:hover { background: var(--surface-muted); }
 .app-shell .other-tasks-list .task-card::before, .app-shell .other-tasks-list .task-card::after { display: none; }
+
+/* Keep attachment actions alongside task properties and draft guidance compact. */
+.composer-properties { display: flex; flex-wrap: wrap; align-items: center; }
+.attachment-trigger { gap: 6px; white-space: nowrap; }
+.attachment-trigger > span { font-size: 11px; color: var(--text-secondary); }
+.task-form .composer-draft-note,
+.issue-editor-content .composer-draft-note { margin: 4px 0 0; font-size: 11px; line-height: 18px; color: var(--text-secondary); }
+
+.activity-command-heading { display: flex; align-items: baseline; gap: 8px; }
+.activity-command-heading > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-command-heading > strong, .activity-command-heading > small { flex-shrink: 0; }
+.activity-command-box { margin-top: 10px; }
+.activity-command-box > strong { font-size: 11px; }
+.activity-command-box pre { margin: 4px 0 0; border: 1px solid var(--border); }
+
+button.attachment-link { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.attachment-preview { width: min(900px, 90vw); max-height: 85vh; padding: 0; border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary); background: var(--surface-raised); box-shadow: 0 20px 80px #0006; }
+.attachment-preview::backdrop { background: #0008; }
+.attachment-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.attachment-preview h2 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.attachment-preview-content { padding: 20px; overflow: auto; max-height: 65vh; }
+.attachment-preview-content > img { display: block; max-width: 100%; max-height: 62vh; margin: auto; object-fit: contain; }
+.attachment-preview-content pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.attachment-preview-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.attachment-local-path { color: var(--text-secondary); overflow-wrap: anywhere; font-size: 12px; }
+.attachment-markdown { line-height: 1.6; overflow-wrap: anywhere; }
+.attachment-markdown p { min-height: .5em; margin: 6px 0; white-space: pre-wrap; }
+.attachment-markdown pre { padding: 14px; background: #8882; border-radius: 6px; }
+.attachment-markdown blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid #888; }
+.markdown-heading { font-weight: 600; font-size: 17px; margin: 16px 0 8px; }
+.markdown-heading.level-1 { font-size: 26px; }
+.markdown-heading.level-2 { font-size: 22px; }
+.markdown-list-item { margin-left: 16px; }
