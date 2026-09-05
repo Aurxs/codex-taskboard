@@ -661,6 +661,7 @@ class Scheduler:
                 )
             else:
                 prompt = continuation_prompt
+            prompt += self.db.attachment_prompt(task_id)
             await self._set_task(task_id, run_state=RunState.RUNNING.value)
             options = await self.execution_options(task.get("model"), task.get("reasoningEffort"))
             turn_id = await self.server.start_turn(thread_id, prompt, task_id=task_id, **options)

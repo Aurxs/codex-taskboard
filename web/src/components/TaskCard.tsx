@@ -36,7 +36,7 @@ export function TaskCard({
   onDragStart: (task: Task, height: number) => void;
   onDragEnd: () => void;
 }) {
-  const blocked = task.status === "todo" && (!task.ready || task.blockedBy.some((item) => item.status !== "done"));
+  const blocked = task.status === "todo" && task.blockedBy.some((item) => item.status !== "done");
   const pendingInteraction = task.interactions?.some((interaction) => interaction.status === "pending");
   const processing = task.status === "in_progress";
   const excerpt = markdownExcerpt(task.description);

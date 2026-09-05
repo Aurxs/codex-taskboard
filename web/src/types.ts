@@ -11,7 +11,10 @@ export interface ActorIdentity {
   avatarUrl: string | null;
 }
 
-export const TASK_PRIORITIES = ["urgent", "high", "medium", "low", "none"] as const;
+export const TASK_PRIORITIES = ["urgent", "high", "medium", "low", "none", "draft"] as const;
+export interface AttachmentInput { name: string; content: string }
+export interface TaskAttachment { id: string; name: string; size: number; url: string }
+
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 
 export const TASK_RUN_STATES = [
@@ -92,6 +95,7 @@ export interface Task extends ExecutionOptions {
   title: string;
   description: string;
   priority: TaskPriority;
+  attachments?: TaskAttachment[];
   status: AnyTaskStatus;
   version: number;
   threadId: string | null;
@@ -101,6 +105,7 @@ export interface Task extends ExecutionOptions {
   blockedBy: TaskSummary[];
   blocks: TaskSummary[];
   ready: boolean;
+  completedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   interactions?: Interaction[];
@@ -178,6 +183,7 @@ export const PRIORITY_LABELS: Record<TaskPriority, string> = {
   medium: "中",
   low: "低",
   none: "无优先级",
+  draft: "草稿",
 };
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {

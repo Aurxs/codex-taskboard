@@ -9,6 +9,8 @@ same task.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import hashlib
 import re
@@ -23,7 +25,7 @@ from typing import Any, Iterator
 from .constants import ALL_PRIORITIES, ALL_STATUSES, Priority, TaskStatus
 from .errors import ConflictError, NotFoundError, ValidationError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 _UNSET = object()
 _KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 _KEY_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_-]+")
@@ -208,6 +210,35 @@ class Database:
                 PRIMARY KEY (task_id, id))""")
             self._conn.execute("UPDATE schema_meta SET version = 4 WHERE singleton = 1")
             current = 4
+        if current < 5:
+            # Rebuild the CHECK constraint while preserving dependent tables and indexes.
+            self._conn.execute("PRAGMA foreign_keys = OFF")
+            try:
+                with self.transaction(immediate=True):
+                    schema = self._conn.execute("SELECT sql FROM sqlite_master WHERE name = 'tasks'").fetchone()[0]
+                    indexes = self._conn.execute("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'tasks' AND sql IS NOT NULL").fetchall()
+                    schema = re.sub(r'CREATE TABLE ["`\[]?tasks["`\]]?', "CREATE TABLE tasks_new", schema, count=1).replace("'low', 'none'", "'low', 'none', 'draft'")
+                    self._conn.execute(schema)
+                    self._conn.execute("INSERT INTO tasks_new SELECT * FROM tasks")
+                    self._conn.execute("DROP TABLE tasks")
+                    self._conn.execute("ALTER TABLE tasks_new RENAME TO tasks")
+                    for index in indexes:
+                        self._conn.execute(index[0])
+                    self._conn.execute("""CREATE TABLE task_attachments (
+                        id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                        name TEXT NOT NULL, content BLOB NOT NULL)""")
+                    if self._conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                        raise RuntimeError("Migration would violate foreign keys")
+                    self._conn.execute("UPDATE schema_meta SET version = 5 WHERE singleton = 1")
+            finally:
+                self._conn.execute("PRAGMA foreign_keys = ON")
+            current = 5
+        if current < 6:
+            with self.transaction(immediate=True):
+                self._conn.execute("ALTER TABLE tasks ADD COLUMN completed_at TEXT")
+                self._conn.execute("UPDATE tasks SET completed_at = updated_at WHERE status = 'done'")
+                self._conn.execute("UPDATE schema_meta SET version = 6 WHERE singleton = 1")
+            current = 6
         if current != SCHEMA_VERSION:
             raise RuntimeError(f"No migration path from schema {current}")
 
@@ -265,7 +296,7 @@ class Database:
             """,
             (task_id,),
         ).fetchall()
-        ready = row["status"] == TaskStatus.TODO.value and all(
+        ready = row["status"] == TaskStatus.TODO.value and row["priority"] != "draft" and all(
             blocker["status"] == TaskStatus.DONE.value for blocker in blocked_by
         )
         return {
@@ -274,6 +305,9 @@ class Database:
             "projectId": row["project_id"],
             "title": row["title"],
             "description": row["description"],
+            "attachments": [{"id": a["id"], "name": a["name"], "size": a["size"],
+                             "url": f"/api/attachments/{a['id']}"}
+                            for a in self._conn.execute("SELECT id, name, length(content) AS size FROM task_attachments WHERE task_id = ? ORDER BY rowid", (task_id,))],
             "priority": row["priority"],
             "model": row["model"],
             "reasoningEffort": row["reasoning_effort"],
@@ -286,6 +320,7 @@ class Database:
             "blockedBy": [self._summary(item) for item in blocked_by],
             "blocks": [self._summary(item) for item in blocks],
             "ready": ready,
+            "completedAt": row["completed_at"],
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
@@ -649,6 +684,7 @@ class Database:
         description: str = "",
         priority: str = Priority.NONE.value,
         task_id: str | None = None,
+        attachments: list[dict[str, str]] | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
@@ -658,6 +694,7 @@ class Database:
             raise ValidationError("Task title cannot be empty")
         if priority not in ALL_PRIORITIES:
             raise ValidationError(f"Invalid priority {priority!r}")
+        prepared = self._prepare_attachments(attachments or [])
         task_id = task_id or new_id()
         now = utc_now()
         with self.transaction(immediate=True):
@@ -681,7 +718,55 @@ class Database:
                 """,
                 (task_id, identifier, project_id, title, description, priority, model, reasoning_effort, now, now),
             )
+            self._conn.executemany("INSERT INTO task_attachments(id, task_id, name, content) VALUES (?, ?, ?, ?)",
+                                   [(aid, task_id, name, content) for aid, name, content in prepared])
             return self._task_json_locked(task_id)
+
+    @staticmethod
+    def _prepare_attachments(attachments: list[dict[str, str]]) -> list[tuple[str, str, bytes]]:
+        prepared = []
+        total = 0
+        if len(attachments or []) > 10:
+            raise ValidationError("最多添加 10 个附件")
+        for item in attachments or []:
+            name = item.get("name", "")
+            if not name or len(name) > 255 or any(c in name for c in ("/", "\\", "\x00", "\r", "\n")) or name in {".", ".."}:
+                raise ValidationError("附件文件名无效")
+            if Path(name).suffix.lower() not in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".md", ".markdown", ".txt", ".pdf", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx"}:
+                raise ValidationError("仅支持图片、Markdown、文本、PDF 和 Office 文档")
+            encoded = item.get("content", "")
+            if len(encoded) > 14_000_000:
+                raise ValidationError("单个附件不能超过 10 MB")
+            try:
+                content = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error):
+                raise ValidationError("附件编码无效") from None
+            total += len(content)
+            if len(content) > 10 * 1024 * 1024 or total > 20 * 1024 * 1024:
+                raise ValidationError("单个附件最多 10 MB，合计最多 20 MB")
+            prepared.append((new_id(), name, content))
+        return prepared
+
+    def get_attachment(self, attachment_id: str) -> tuple[str, bytes]:
+        with self._lock:
+            row = self._conn.execute("SELECT name, content FROM task_attachments WHERE id = ?", (attachment_id,)).fetchone()
+            if row is None:
+                raise NotFoundError("Attachment was not found")
+            return row["name"], row["content"]
+
+    def attachment_path(self, attachment_id: str) -> Path:
+        name, content = self.get_attachment(attachment_id)
+        folder = self.path.resolve().parent / "attachments" / attachment_id
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / name
+        if not path.exists() or path.read_bytes() != content:
+            path.write_bytes(content)
+        return path
+
+    def attachment_prompt(self, task_id: str) -> str:
+        task = self.get_task(task_id)
+        paths = [str(self.attachment_path(item["id"])) for item in task["attachments"]]
+        return "\n\n任务附件（请读取文档或查看图片）：\n" + "\n".join(paths) if paths else ""
 
     def update_task(
         self,
@@ -698,6 +783,7 @@ class Database:
         run_state: str | None | object = _UNSET,
         last_message: str | None | object = _UNSET,
         last_error: Any = _UNSET,
+        attachments: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         values: dict[str, Any] = {}
         if title is not _UNSET:
@@ -748,12 +834,27 @@ class Database:
                 values["last_error"] = last_error
             else:
                 values["last_error"] = _json(last_error)
-        if not values:
+        prepared = self._prepare_attachments(attachments or [])
+        if not values and not prepared:
             return self.get_task(task_id)
         values["updated_at"] = utc_now()
         assignments = ", ".join(f"{column} = ?" for column in values)
-        params = [*values.values(), task_id, expected_version]
+        if status == "done":
+            assignments += ", completed_at = CASE WHEN status = 'done' THEN completed_at ELSE ? END"
+            params = [*values.values(), values["updated_at"], task_id, expected_version]
+        else:
+            if status is not _UNSET:
+                assignments += ", completed_at = NULL"
+            params = [*values.values(), task_id, expected_version]
         with self.transaction(immediate=True):
+            if prepared:
+                existing = self._conn.execute("SELECT count(*), coalesce(sum(length(content)), 0) FROM task_attachments WHERE task_id = ?", (task_id,)).fetchone()
+                if existing[0] + len(prepared) > 10 or existing[1] + sum(len(content) for _, _, content in prepared) > 20 * 1024 * 1024:
+                    raise ValidationError("最多 10 个附件，合计最多 20 MB")
+            if priority == "draft":
+                current = self._conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+                if current is not None and current["status"] == "in_progress":
+                    raise ValidationError("请先暂停任务，再将其设为草稿")
             cursor = self._conn.execute(
                 f"UPDATE tasks SET {assignments}, version = version + 1 WHERE id = ? AND version = ?",
                 params,
@@ -767,6 +868,8 @@ class Database:
                 raise ConflictError(
                     f"Task {task_id} changed; expected version {expected_version}, current {exists['version']}"
                 )
+            self._conn.executemany("INSERT INTO task_attachments(id, task_id, name, content) VALUES (?, ?, ?, ?)",
+                                   [(aid, task_id, name, content) for aid, name, content in prepared])
             return self._task_json_locked(task_id)
 
     def claim_next_ready(self, project_id: str) -> dict[str, Any] | None:
@@ -789,6 +892,7 @@ class Database:
                 FROM tasks t
                 WHERE t.project_id = ?
                   AND t.status = 'todo'
+                  AND t.priority <> 'draft'
                   AND NOT EXISTS (
                     SELECT 1 FROM task_dependencies d
                     JOIN tasks blocker ON blocker.id = d.blocker_task_id
@@ -831,6 +935,8 @@ class Database:
                 raise NotFoundError(f"Task {task_id} was not found")
             if int(task["version"]) != expected_version:
                 raise ConflictError("Task changed; refresh before running it")
+            if task["priority"] == "draft":
+                raise ValidationError("请先将草稿改为其他优先级，再执行任务")
             if task["status"] != TaskStatus.TODO.value:
                 raise ValidationError("Only todo tasks can be run")
             blockers = self._conn.execute(

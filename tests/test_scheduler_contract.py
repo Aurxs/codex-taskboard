@@ -279,6 +279,15 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.server.turn_calls[0][1], QUOTA_RESUME_PROMPT)
         self.assertEqual(self.db.get_task(task["id"])["status"], TaskStatus.DONE.value)
 
+    async def test_attachment_paths_reach_codex_turn(self):
+        project = self.project("FILES")
+        task = self.db.create_task(project_id=project["id"], title="with attachment", attachments=[
+            {"name": "notes.md", "content": "IyBIZWxsbw=="}])
+        self.db.claim_task(task["id"], task["version"])
+        await self.scheduler._execute_task(task["id"], None)
+        self.assertIn(self.db.attachment_prompt(task["id"]), self.server.turn_calls[0][1])
+        self.assertIn("notes.md", self.server.turn_calls[0][1])
+
     async def test_initial_and_failed_retry_prompts_are_exact_and_keep_thread(self) -> None:
         project = self.project("PROMPT", review_required=False)
         initial = self.task(project["id"], "initial")

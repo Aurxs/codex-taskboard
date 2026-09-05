@@ -1,5 +1,6 @@
 import type {
   ApiErrorShape,
+  AttachmentInput,
   CodexModel,
   EventEnvelope,
   Interaction,
@@ -110,6 +111,7 @@ function normalizeTask(value: unknown): Task {
     projectId: String(item.projectId ?? ""),
     title: String(item.title ?? ""),
     description: String(item.description ?? ""),
+    attachments: (item.attachments ?? []) as Task["attachments"],
     model: item.model == null ? null : String(item.model),
     reasoningEffort: item.reasoningEffort == null ? null : String(item.reasoningEffort),
     priority: (item.priority ?? "none") as TaskPriority,
@@ -122,6 +124,7 @@ function normalizeTask(value: unknown): Task {
     blockedBy,
     blocks,
     ready: Boolean(item.ready ?? blockedBy.every((task) => task.status === "done")),
+    completedAt: item.completedAt == null ? null : String(item.completedAt),
     createdAt: String(item.createdAt ?? new Date().toISOString()),
     updatedAt: String(item.updatedAt ?? new Date().toISOString()),
     interactions: Array.isArray(item.interactions) ? item.interactions as Interaction[] : undefined,
@@ -221,7 +224,7 @@ export async function getTask(id: string): Promise<Task> {
 
 export async function createTask(
   projectId: string,
-  input: { title: string; description: string; priority: TaskPriority; blockedByIds?: string[]; model?: string | null; reasoningEffort?: string | null },
+  input: { title: string; description: string; priority: TaskPriority; blockedByIds?: string[]; attachments?: AttachmentInput[]; model?: string | null; reasoningEffort?: string | null },
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/projects/${encodeURIComponent(projectId)}/tasks`, {
     method: "POST",
@@ -232,7 +235,7 @@ export async function createTask(
 export async function updateTask(
   id: string,
   version: number,
-  changes: Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">>,
+  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">> & { attachments?: import("./types").AttachmentInput[] }),
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -344,4 +347,12 @@ export async function pickDirectory(): Promise<string | null> {
 
 export async function listModels(): Promise<CodexModel[]> {
   return asArray<CodexModel>(await request("/api/codex/models"), "models");
+}
+
+export function previewAttachment(id: string) {
+  return request<{ kind: "image" | "markdown" | "text" | "external"; content: string }>(`/api/attachments/${encodeURIComponent(id)}/preview`);
+}
+
+export function openAttachment(id: string) {
+  return request(`/api/attachments/${encodeURIComponent(id)}/open`, { method: "POST" });
 }

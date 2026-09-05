@@ -35,6 +35,10 @@ This is an independent community project with no affiliation with or endorsement
 
 Enter a title, Markdown description, priority, and acceptance criteria. Choose a model and reasoning effort when needed; the choices take effect on the next execution.
 
+Attach PNG, JPEG, GIF, WebP images or Markdown documents when creating a task (up to 10 files, 10 MB each, 20 MB total). Files are saved with the task, downloadable from its details, and provided to Codex through local paths during execution.
+
+Choose the Draft priority to save unfinished ideas in Todo without automatic or manual execution. Change to another priority to publish; pause running tasks before turning them into drafts.
+
 ![Task creation and execution options](docs/images/task-controls.png)
 
 ### Set dependencies to make execution order clear

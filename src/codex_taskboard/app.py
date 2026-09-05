@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import subprocess
@@ -12,7 +13,8 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, Response
+from urllib.parse import quote
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,18 +74,25 @@ class TaskExecutionBody(StrictModel):
     reasoningEffort: str | None = Field(default=None, min_length=1, max_length=40)
 
 
+class AttachmentBody(StrictModel):
+    name: str = Field(min_length=1, max_length=255)
+    content: str = Field(max_length=14_000_000)
+
+
 class TaskCreateBody(TaskExecutionBody):
     title: str
     description: str = ""
-    priority: Literal["urgent", "high", "medium", "low", "none"] = "none"
+    priority: Literal["urgent", "high", "medium", "low", "none", "draft"] = "none"
     blockedByIds: list[str] = Field(default_factory=list)
+    attachments: list[AttachmentBody] = Field(default_factory=list, max_length=10)
 
 
 class TaskUpdateBody(TaskExecutionBody):
+    attachments: list[AttachmentBody] = Field(default_factory=list, max_length=10)
     version: int = Field(ge=1)
     title: str | None = None
     description: str | None = None
-    priority: Literal["urgent", "high", "medium", "low", "none"] | None = None
+    priority: Literal["urgent", "high", "medium", "low", "none", "draft"] | None = None
 
 
 class DependenciesBody(StrictModel):
@@ -346,12 +355,53 @@ def create_app(
             title=body.title,
             description=body.description,
             priority=body.priority,
+            attachments=[item.model_dump() for item in body.attachments],
         )
         if body.blockedByIds:
             task = db.replace_dependencies(task["id"], task["version"], body.blockedByIds)
         await events.publish("task.updated", project_id=project_id, task_id=task["id"], payload=task)
         scheduler.kick()
         return task
+
+    @app.get("/api/attachments/{attachment_id}")
+    async def download_attachment(attachment_id: str) -> Response:
+        name, content = db.get_attachment(attachment_id)
+        return Response(content, media_type="application/octet-stream", headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(name, safe='')}",
+            "X-Content-Type-Options": "nosniff",
+        })
+
+    @app.get("/api/attachments/{attachment_id}/preview")
+    async def preview_attachment(attachment_id: str) -> dict[str, str]:
+        path = db.attachment_path(attachment_id)
+        types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                 ".gif": "image/gif", ".webp": "image/webp"}
+        suffix = path.suffix.lower()
+        if suffix in types:
+            return {"kind": "image", "content": "data:" + types[suffix] + ";base64," +
+                    base64.b64encode(path.read_bytes()).decode("ascii")}
+        if suffix in {".md", ".markdown", ".txt"}:
+            return {"kind": "text" if suffix == ".txt" else "markdown",
+                    "content": path.read_text(encoding="utf-8-sig", errors="replace")}
+        return {"kind": "external", "content": str(path)}
+
+    @app.post("/api/attachments/{attachment_id}/open")
+    async def open_attachment(attachment_id: str) -> dict[str, bool]:
+        path = db.attachment_path(attachment_id)
+        if path.suffix.lower() not in {".pdf", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx"}:
+            raise ValidationError("此附件应在面板内预览")
+        try:
+            if sys.platform == "win32":
+                await asyncio.to_thread(os.startfile, str(path))
+            else:
+                command = ["/usr/bin/open", str(path)] if sys.platform == "darwin" else ["xdg-open", str(path)]
+                result = await asyncio.to_thread(subprocess.run, command, check=False,
+                                               capture_output=True, timeout=15)
+                if result.returncode:
+                    raise TaskboardError("无法在系统默认应用中打开附件，请检查是否安装了对应应用")
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise TaskboardError("无法在系统默认应用中打开附件") from exc
+        return {"opened": True}
 
     @app.get("/api/tasks/{task_id}")
     async def task_detail(task_id: str) -> dict[str, Any]:

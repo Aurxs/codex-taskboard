@@ -46,6 +46,81 @@ class HttpContractTests(unittest.IsolatedAsyncioTestCase):
         self.app.state.db.close()
         self.temp_dir.cleanup()
 
+    async def test_create_draft_with_attachment_and_download(self):
+        project = self.app.state.db.create_project(key="FILES", name="Files", workspace_path=self.temp_dir.name)
+        response = await self.client.post(f"/api/projects/{project['id']}/tasks", json={
+            "title": "Draft", "priority": "draft", "attachments": [{"name": "notes.md", "content": "IyBIZWxsbw=="}]})
+        self.assertEqual(response.status_code, 201)
+        task = response.json()
+        self.assertFalse(task["ready"])
+        download = await self.client.get(task["attachments"][0]["url"])
+        self.assertEqual(download.content, b"# Hello")
+        self.assertIn("attachment;", download.headers["content-disposition"])
+        invalid = await self.client.post(f"/api/projects/{project['id']}/tasks", json={
+            "title": "Invalid", "attachments": [{"name": "../notes.md", "content": "YQ=="}]})
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(len(self.app.state.db.list_tasks(project["id"])), 1)
+
+    async def test_local_attachment_preview_and_external_open(self):
+        db = self.app.state.db
+        project = db.create_project(key="PREVIEW", name="Preview", workspace_path=self.temp_dir.name)
+        task = db.create_task(project_id=project["id"], title="Preview", attachments=[
+            {"name": "notes.md", "content": "IyBIZWxsbw=="},
+            {"name": "image.png", "content": "YWJj"},
+            {"name": "slides.pptx", "content": "YWJj"},
+            {"name": "document.docx", "content": "YWJj"},
+        ])
+        markdown, image, slides, document = task["attachments"]
+        response = await self.client.get(markdown["url"] + "/preview")
+        self.assertEqual(response.json(), {"kind": "markdown", "content": "# Hello"})
+        self.assertEqual(db.attachment_path(markdown["id"]).read_bytes(), b"# Hello")
+        response = await self.client.get(image["url"] + "/preview")
+        self.assertEqual(response.json(), {"kind": "image", "content": "data:image/png;base64,YWJj"})
+        with patch("codex_taskboard.app.sys.platform", "darwin"), patch("codex_taskboard.app.subprocess.run") as run:
+            for file in (slides, document):
+                response = await self.client.get(file["url"] + "/preview")
+                self.assertEqual(response.json()["kind"], "external")
+                self.assertEqual(Path(response.json()["content"]).read_bytes(), b"abc")
+            run.assert_not_called()
+            run.return_value.returncode = 0
+            response = await self.client.post(slides["url"] + "/open")
+            self.assertEqual(response.json(), {"opened": True})
+            self.assertEqual(run.call_args.args[0], ["/usr/bin/open", str(db.attachment_path(slides["id"]))])
+            run.reset_mock()
+            response = await self.client.post(markdown["url"] + "/open")
+            self.assertEqual(response.status_code, 422)
+            run.assert_not_called()
+            run.return_value.returncode = 1
+            response = await self.client.post(document["url"] + "/open")
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("系统默认应用", response.json()["error"]["message"])
+        response = await self.client.get("/api/attachments/missing/preview")
+        self.assertEqual(response.status_code, 404)
+
+    async def test_append_attachments_is_atomic_and_versioned(self):
+        project = self.app.state.db.create_project(key="APPEND", name="Append", workspace_path=self.temp_dir.name)
+        task = self.app.state.db.create_task(project_id=project["id"], title="Draft", priority="draft",
+                                             attachments=[{"name": "first.md", "content": "YQ=="}])
+        url = f"/api/tasks/{task['id']}"
+        response = await self.client.patch(url, json={"version": task["version"],
+            "attachments": [{"name": "second.png", "content": "Yg=="}]})
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()
+        self.assertEqual([item["name"] for item in updated["attachments"]], ["first.md", "second.png"])
+        self.assertEqual(updated["version"], task["version"] + 1)
+        download = await self.client.get(updated["attachments"][1]["url"])
+        self.assertEqual(download.content, b"b")
+        conflict = await self.client.patch(url, json={"version": task["version"],
+            "attachments": [{"name": "stale.md", "content": "YQ=="}]})
+        self.assertEqual(conflict.status_code, 409)
+        for files in ([{"name": "valid.md", "content": "YQ=="}, {"name": "bad.exe", "content": "YQ=="}],
+                      [{"name": "extra.md", "content": "YQ=="}] * 9):
+            rejected = await self.client.patch(url, json={"version": updated["version"], "attachments": files})
+            self.assertEqual(rejected.status_code, 422)
+        current = self.app.state.db.get_task(task["id"])
+        self.assertEqual(current["attachments"], updated["attachments"])
+        self.assertEqual(current["version"], updated["version"])
+
     async def test_project_defaults_null_validation_conflict_and_static(self) -> None:
         health = await self.client.get("/health")
         self.assertEqual(health.status_code, 200)

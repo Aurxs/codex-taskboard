@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+from pathlib import Path
 import unittest
 from tempfile import TemporaryDirectory
 
@@ -34,6 +36,84 @@ class DatabaseContractTests(unittest.TestCase):
                 "UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?",
                 (value, value, task_id),
             )
+
+    def test_completed_time_survives_later_edits(self):
+        project = self.project()
+        task = self.task(project["id"], "completion time")
+        self.assertIsNone(task["completedAt"])
+        done = self.db.update_task(task["id"], task["version"], status="done")
+        self.assertEqual(done["completedAt"], done["updatedAt"])
+        edited = self.db.update_task(done["id"], done["version"], title="edited")
+        self.assertEqual(edited["completedAt"], done["completedAt"])
+        repeated = self.db.update_task(edited["id"], edited["version"], status="done")
+        self.assertEqual(repeated["completedAt"], done["completedAt"])
+
+    def test_completion_time_migration_backfills_existing_done_tasks(self):
+        project = self.project()
+        task = self.task(project["id"], "legacy completion")
+        done = self.db.update_task(task["id"], task["version"], status="done")
+        with self.db.transaction(immediate=True):
+            self.db._conn.execute("ALTER TABLE tasks DROP COLUMN completed_at")
+            self.db._conn.execute("UPDATE schema_meta SET version = 5")
+        self.db.close()
+        self.db = Database(f"{self.temp_dir.name}/taskboard.sqlite3")
+        self.assertEqual(self.db.get_task(done["id"])["completedAt"], done["updatedAt"])
+
+    def test_draft_is_not_claimed_until_published(self):
+        project = self.project()
+        draft = self.task(project["id"], "draft", "draft")
+        self.assertFalse(draft["ready"])
+        self.assertIsNone(self.db.claim_next_ready(project["id"]))
+        with self.assertRaises(ValidationError):
+            self.db.claim_task(draft["id"], draft["version"])
+        ready = self.db.update_task(draft["id"], draft["version"], priority="high")
+        self.assertTrue(ready["ready"])
+        self.assertEqual(self.db.claim_next_ready(project["id"])["id"], draft["id"])
+        with self.assertRaises(ValidationError):
+            self.db.update_task(ready["id"], ready["version"] + 1, priority="draft")
+
+    def test_attachments_are_atomic_persistent_and_available_to_codex(self):
+        project = self.project()
+        content = "# 验收标准\n保留图片".encode()
+        task = self.db.create_task(project_id=project["id"], title="files", attachments=[
+            {"name": "说明.md", "content": base64.b64encode(content).decode()}])
+        attachment = task["attachments"][0]
+        self.assertEqual(attachment["size"], len(content))
+        self.db.close()
+        self.db = Database(f"{self.temp_dir.name}/taskboard.sqlite3")
+        self.assertEqual(self.db.get_attachment(attachment["id"]), ("说明.md", content))
+        path = self.db.attachment_prompt(task["id"]).splitlines()[-1]
+        self.assertEqual(Path(path).read_bytes(), content)
+        for name, encoded in [("../bad.md", "YQ=="), ("a.md", "bad!"), ("a.html", "YQ==")]:
+            with self.assertRaises(ValidationError):
+                self.db.create_task(project_id=project["id"], title="invalid", attachments=[{"name": name, "content": encoded}])
+        self.assertEqual(len(self.db.list_tasks(project["id"])), 1)
+        self.db.delete_task(task["id"], task["version"])
+        self.assertEqual(self.db._conn.execute("SELECT count(*) FROM task_attachments").fetchone()[0], 0)
+
+    def test_v4_migration_preserves_tasks_dependencies_and_activity(self):
+        project = self.project()
+        first = self.task(project["id"], "first")
+        second = self.task(project["id"], "second")
+        self.db.replace_dependencies(second["id"], second["version"], [first["id"]])
+        self.db.save_activity(first["id"], {"id": "event", "message": "saved"})
+        conn = self.db._conn
+        conn.execute("PRAGMA foreign_keys = OFF")
+        schema = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'tasks'").fetchone()[0]
+        schema = schema.replace('CREATE TABLE "tasks"', 'CREATE TABLE tasks_old').replace(", 'draft'", "")
+        conn.execute(schema)
+        conn.execute("INSERT INTO tasks_old SELECT * FROM tasks")
+        conn.execute("DROP TABLE tasks")
+        conn.execute("ALTER TABLE tasks_old RENAME TO tasks")
+        conn.execute("DROP TABLE task_attachments")
+        conn.execute("UPDATE schema_meta SET version = 4")
+        conn.execute("PRAGMA foreign_keys = ON")
+        self.db.close()
+        self.db = Database(f"{self.temp_dir.name}/taskboard.sqlite3")
+        self.assertEqual(self.db.get_task(second["id"])["blockedBy"][0]["id"], first["id"])
+        self.assertEqual(self.db.list_activity(first["id"])[0]["message"], "saved")
+        self.assertFalse(self.task(project["id"], "draft", "draft")["ready"])
+        self.assertEqual(self.db._conn.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_self_cross_project_and_indirect_cycles_are_rejected(self) -> None:
         app = self.project()

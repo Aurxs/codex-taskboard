@@ -60,6 +60,7 @@ const PRIORITY_SOURCES: Record<TaskPriority, string> = {
   medium: priorityMediumSource,
   low: priorityLowSource,
   none: priorityNoneSource,
+  draft: priorityNoneSource,
 };
 
 export function PriorityIcon({ priority, color, ...props }: Omit<MaskIconProps, "source"> & { priority?: TaskPriority }) {

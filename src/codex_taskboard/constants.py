@@ -31,6 +31,7 @@ class Priority(StrEnum):
     MEDIUM = "medium"
     LOW = "low"
     NONE = "none"
+    DRAFT = "draft"
 
 
 PRIORITY_RANK = {
@@ -39,6 +40,7 @@ PRIORITY_RANK = {
     Priority.MEDIUM.value: 2,
     Priority.LOW.value: 3,
     Priority.NONE.value: 4,
+    Priority.DRAFT.value: 5,
 }
 
 INITIAL_TURN_TEMPLATE = (

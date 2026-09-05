@@ -360,7 +360,7 @@ function EmbeddedTaskboard() {
     setDetail((current) => current?.id === next.id ? next : current);
   }, []);
 
-  const updateTaskResource = useCallback(async (task: Task, changes: Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">>) => {
+  const updateTaskResource = useCallback(async (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">> & { attachments?: import("./types").AttachmentInput[] })) => {
     try {
       const next = await updateTask(task.id, task.version, changes);
       updateTaskInState(next);
@@ -413,7 +413,7 @@ function EmbeddedTaskboard() {
     const created = await createTask(selectedProject.id, input);
     setTasks((current) => [...current, created]);
     notify("任务已创建", "success");
-    if (editorStatus && editorStatus !== "todo") {
+    if (input.priority !== "draft" && editorStatus && editorStatus !== "todo") {
       const next = await performAction(created, editorStatus === "in_progress" ? "run" : "complete", undefined, editorStatus === "in_review" ? "in_review" : editorStatus === "done" ? "done" : undefined);
       if (next) updateTaskInState(next);
     }
@@ -442,7 +442,7 @@ function EmbeddedTaskboard() {
     if (!task || task.status === status) return;
     if (task.status === "done") { notify("已完成任务不能拖回。", "error"); return; }
     if (task.status === "todo" && status === "in_progress") {
-      if (!task.ready) { notify("该任务仍被前置任务阻塞。", "error"); return; }
+      if (!task.ready) { notify("请先发布草稿并完成前置任务。", "error"); return; }
       await performAction(task, "run");
       return;
     }
@@ -473,7 +473,7 @@ function EmbeddedTaskboard() {
       return !needle || `${task.identifier} ${task.title} ${task.description}`.toLocaleLowerCase().includes(needle);
     });
   }, [includeCanceled, search, tasks]);
-  const grouped = useMemo(() => Object.fromEntries(COLUMN_ORDER.map((status) => [status, visibleTasks.filter((task) => task.status === status)])) as Record<TaskStatus, Task[]>, [visibleTasks]);
+  const grouped = useMemo(() => Object.fromEntries(COLUMN_ORDER.map((status) => [status, visibleTasks.filter((task) => task.status === status).sort((a, b) => status === "done" ? Date.parse(b.completedAt ?? b.updatedAt) - Date.parse(a.completedAt ?? a.updatedAt) : 0)])) as Record<TaskStatus, Task[]>, [visibleTasks]);
   const appShellStyle = { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px`, "--main-column-count": 4, "--main-board-min-width": "1272px", "--main-board-max-width": "1672px" } as CSSProperties;
 
   return (
