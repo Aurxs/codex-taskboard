@@ -94,6 +94,8 @@ export function TaskDetail({
   onResolveInteraction: (interaction: Interaction, response: unknown) => Promise<void>;
 }) {
   const [current, setCurrent] = useState(task);
+  const dirty = useRef({ title: false, description: false, priority: false });
+  const drafts = useRef({ title: task.title, description: task.description, priority: task.priority });
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
@@ -123,10 +125,11 @@ export function TaskDetail({
   }
 
   useEffect(() => {
+    if (task.version < current.version) return;
     setCurrent(task);
-    setTitle(task.title);
-    setDescription(task.description);
-    setPriority(task.priority);
+    if (!dirty.current.title) setTitle(task.title);
+    if (!dirty.current.description) setDescription(task.description);
+    if (!dirty.current.priority) setPriority(task.priority);
   }, [task]);
 
   const pendingInteractions = useMemo(() => (current.interactions ?? []).filter((interaction) => interaction.status === "pending"), [current.interactions]);
@@ -134,15 +137,20 @@ export function TaskDetail({
     setSaving(true);
     try {
       const next = await onUpdate(current, changes);
-      if (next) setCurrent(next);
+      if (next) {
+        setCurrent(current => next.version >= current.version ? next : current);
+        for (const field of ["title", "description", "priority"] as const) {
+          if (changes[field] !== undefined && drafts.current[field] === changes[field]) dirty.current[field] = false;
+        }
+      }
+      return next;
     } finally {
       setSaving(false);
     }
   }
   async function saveText() {
-    const next = await onUpdate(current, { title: title.trim(), description });
-    if (next) setCurrent(next);
-    setEditingDescription(false);
+    const next = await save({ description });
+    if (next) setEditingDescription(false);
   }
   async function dependencyChange(ids: string[]) {
     const next = await onDependencies(current, ids);
@@ -152,17 +160,17 @@ export function TaskDetail({
   return (
     <div className="issue-detail">
       {previewFile && <AttachmentPreview key={previewFile.id} file={previewFile} onClose={() => setPreviewFile(null)} />}
+      <div className="issue-parent-link has-parent"><button className="detail-back-button" type="button" onClick={onBack} aria-label="返回议题看板"><LinearIcon name="chevronLeft" /></button><span className="issue-parent-prefix">返回</span><span className="issue-relation-id">{current.identifier}</span></div>
       <div className="issue-detail-scroll">
         <div className="issue-detail-layout">
           <div className="issue-detail-main">
             <div className="issue-editor">
               <div className="issue-editor-content" onPaste={event => { void addFiles(pastedFiles(event)); }}>
-                <div className="issue-parent-link has-parent"><button className="detail-back-button" type="button" onClick={onBack} aria-label="返回议题看板"><LinearIcon name="chevronLeft" /></button><span className="issue-parent-prefix">任务</span><span className="issue-relation-id">{current.identifier}</span></div>
-                <textarea className="issue-title-input" rows={1} value={title} disabled={saving} onChange={(event) => setTitle(event.target.value)} onBlur={() => { if (title.trim() && title.trim() !== current.title) void save({ title: title.trim() }); }} />
-                {editingDescription ? <div className="issue-description-composer"><textarea className="issue-description-input" rows={10} value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => void saveText()} autoFocus /></div> : <div className={`issue-description-read${description ? "" : " empty"}`} tabIndex={0} onClick={() => setEditingDescription(true)} onKeyDown={(event) => { if (event.key === "Enter") setEditingDescription(true); }}><div className="issue-description-document">{description ? description.split(/\n\n+/).map((paragraph, index) => <p key={index}>{plainMarkdown(paragraph)}</p>) : "添加描述…"}</div></div>}
+                <textarea className="issue-title-input" rows={1} value={title} disabled={saving} onChange={(event) => { dirty.current.title = true; drafts.current.title = event.target.value; setTitle(event.target.value); }} onBlur={() => { if (title.trim() && title.trim() !== current.title) { drafts.current.title = title.trim(); setTitle(title.trim()); void save({ title: title.trim() }); } }} />
+                {editingDescription ? <div className="issue-description-composer"><textarea className="issue-description-input" rows={10} value={description} onChange={(event) => { dirty.current.description = true; drafts.current.description = event.target.value; setDescription(event.target.value); }} onBlur={() => void saveText()} autoFocus /></div> : <div className={`issue-description-read${description ? "" : " empty"}`} tabIndex={0} onClick={() => setEditingDescription(true)} onKeyDown={(event) => { if (event.key === "Enter") setEditingDescription(true); }}><div className="issue-description-document">{description ? description.split(/\n\n+/).map((paragraph, index) => <p key={index}>{plainMarkdown(paragraph)}</p>) : "添加描述…"}</div></div>}
                 {(current.attachments ?? []).length > 0 && <section className="issue-attachments"><h2>附件</h2><ul className="attachment-list">{current.attachments?.map(file => <li key={file.id}><button type="button" className="attachment-link" onClick={() => setPreviewFile(file)}><span className="attachment-copy"><strong>{file.name}</strong><span>{Math.ceil(file.size / 1024)} KB · 查看</span></span></button></li>)}</ul></section>}
                 <div className="property-row issue-detail-inline-properties">
-                  <TaskPropertyPicker value={priority} options={TASK_PRIORITIES.map((item) => ({ value: item, label: PRIORITY_LABELS[item], className: `priority-${item}`, icon: <PriorityIcon priority={item} size={14} /> }))} open={propertyOpen} onOpenChange={setPropertyOpen} onChange={(value) => { const next = value as TaskPriority; setPriority(next); void save({ priority: next }); }} ariaLabel="优先级" title={`优先级：${PRIORITY_LABELS[priority]}`} triggerClassName={`property-priority priority-${priority}`} />
+                  <TaskPropertyPicker value={priority} options={TASK_PRIORITIES.map((item) => ({ value: item, label: PRIORITY_LABELS[item], className: `priority-${item}`, icon: <PriorityIcon priority={item} size={14} /> }))} open={propertyOpen} onOpenChange={setPropertyOpen} onChange={(value) => { const next = value as TaskPriority; dirty.current.priority = true; drafts.current.priority = next; setPriority(next); void save({ priority: next }); }} ariaLabel="优先级" title={`优先级：${PRIORITY_LABELS[priority]}`} triggerClassName={`property-priority priority-${priority}`} />
                   <span className="property-control"><StatusIcon status={current.status === "canceled" ? "todo" : current.status as TaskStatus} size={14} /><span>{current.status === "canceled" ? "已取消" : STATUS_LABELS[current.status as TaskStatus] ?? current.status}</span></span>
                   <DependencyPicker candidates={tasks.filter(item => item.id !== current.id && item.status !== "canceled")} value={current.blockedBy.map(item => item.id)} onChange={ids => void dependencyChange(ids)} />
                   <AttachmentButton count={current.attachments?.length ?? 0} disabled={saving || addingAttachments} onAdd={files => void addFiles(files)} />

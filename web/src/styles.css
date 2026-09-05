@@ -2782,6 +2782,7 @@ kbd {
 
 .issue-detail {
   display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   min-width: 0;
@@ -12109,3 +12110,12 @@ button.attachment-link { width: 100%; border: 0; background: transparent; text-a
 .markdown-heading.level-1 { font-size: 26px; }
 .markdown-heading.level-2 { font-size: 22px; }
 .markdown-list-item { margin-left: 16px; }
+
+/* Keep navigation outside the scroll area, including execution history. */
+.issue-detail > .issue-parent-link {
+  position: relative;
+  flex-shrink: 0;
+  min-height: 52px;
+  margin: 0;
+  padding: 12px 28px;
+}

@@ -278,7 +278,7 @@ export async function resolveInteraction(id: string, version: number, response: 
   });
 }
 
-export function createEventStream(onEvent: (event: EventEnvelope) => void, onError?: () => void): () => void {
+export function createEventStream(onEvent: (event: EventEnvelope) => void, onError?: () => void, onOpen?: () => void): () => void {
   const stream = new EventSource("/api/events");
   const handleMessage = (event: MessageEvent<string>) => {
     try {
@@ -287,6 +287,7 @@ export function createEventStream(onEvent: (event: EventEnvelope) => void, onErr
       // Keep the stream alive when a server emits a non-JSON heartbeat.
     }
   };
+  stream.onopen = () => onOpen?.();
   stream.onmessage = handleMessage;
   stream.onerror = () => onError?.();
   return () => stream.close();
