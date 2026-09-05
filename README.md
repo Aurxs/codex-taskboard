@@ -1,61 +1,62 @@
 <div align="center">
-  <img src="src-tauri/icons/icon.png" width="112" alt="Codex Taskboard 应用图标" />
+  <img src="src-tauri/icons/icon.png" width="112" alt="Codex Taskboard app icon" />
   <h1>Codex Taskboard</h1>
-  <p><strong>把任务排进看板，让 Codex 接着做。</strong></p>
-  <p>本地优先 · Codex 内嵌看板 · 任务依赖 · 自动调度 · 人工确认</p>
+  <p><strong>Put your tasks on a board and let Codex take it from there.</strong></p>
+  <p>Local-first · Codex-embedded board · Task dependencies · Automatic scheduling · Human review</p>
   <p>
     <img src="https://img.shields.io/badge/platform-macOS_14%2B_Apple_Silicon-black" alt="macOS 14+ Apple Silicon" />
-    <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="版本 0.1.0" />
+    <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version 0.1.0" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0" /></a>
   </p>
+  <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
-Codex Taskboard 是一个运行在 Codex 内部的本地任务看板：整理需求、设置前置依赖，再交给 Codex 执行。菜单栏启动器负责启动服务和挂载面板，任务、执行记录与项目设置保存在本机 SQLite 数据库中。
+Codex Taskboard is a local task board that runs inside Codex: organize requirements, set prerequisites, and hand them to Codex for execution. The menu bar launcher starts the service and mounts the panel; tasks, execution history, and project settings are stored in a local SQLite database.
 
-这是一个独立社区项目，与 OpenAI 无隶属或背书关系。
+This is an independent community project with no affiliation with or endorsement by OpenAI.
 
-![四列任务看板](docs/images/project-ui.png)
+![Four-column task board](docs/images/project-ui.png)
 
-> 首图为当前版本重新截取的四列看板，其余图片展示任务创建和详情布局；示例任务及模型选项不代表运行时数据，可用模型以本机 Codex 返回结果为准。
+> The main image is a fresh capture of the four-column board in the current version. The other images show task creation and detail layouts. Example tasks and model options do not represent runtime data; available models depend on the response from Codex on your machine.
 
-## 功能亮点
+## Highlights
 
-| 功能 | 使用方式 |
+| Feature | How it works |
 | --- | --- |
-| 四列看板 | 等待认领 → 处理中 → 等你确认 → 完成；取消任务可单独查看 |
-| 任务依赖 | 指定前置任务，阻塞解除后再进入执行流程 |
-| 项目调度 | 同一项目最多运行一个任务，不同项目可并行 |
-| 自动化开关 | 自动认领默认关闭，人工审阅默认开启 |
-| 额度续跑 | 默认开启额度自动续跑，也可按项目关闭并手动恢复原 thread |
-| 执行选项 | 默认沿用 Codex 会话，也可为任务选择模型和推理强度 |
-| 本地集成 | 从 Codex 宿主同步项目和工作目录，使用 App Server 执行任务 |
+| Four-column board | Waiting to be claimed → In progress → Awaiting your review → Done; canceled tasks are available separately |
+| Task dependencies | Set prerequisite tasks; a task enters the execution flow after its blockers are cleared |
+| Project scheduling | At most one task runs per project; different projects can run in parallel |
+| Automation toggles | Auto-claim is off by default, and human review is on by default |
+| Usage-limit continuation | Automatic continuation after usage limits is enabled by default; you can disable it per project and manually resume the original thread |
+| Execution options | Reuse the Codex session by default, or choose a model and reasoning effort for each task |
+| Local integration | Sync projects and working directories from the Codex host and execute tasks through the App Server |
 
-### 创建任务，把上下文交代清楚
+### Create a task with clear context
 
-填写标题、Markdown 描述、优先级和验收要求；需要时选择模型与推理强度，下次执行生效。
+Enter a title, Markdown description, priority, and acceptance criteria. Choose a model and reasoning effort when needed; the choices take effect on the next execution.
 
-![创建任务与执行选项](docs/images/task-controls.png)
+![Task creation and execution options](docs/images/task-controls.png)
 
-### 设置依赖，让执行顺序更清晰
+### Set dependencies to make execution order clear
 
-在「阻塞于」中选择前置任务，拆分有先后关系的工作。
+Select prerequisite tasks under “Blocked by” to split work that must happen in sequence.
 
-![选择前置任务](docs/images/dependency-open.png)
+![Selecting prerequisite tasks](docs/images/dependency-open.png)
 
-### 在详情中查看状态与执行记录
+### View status and execution history in the details
 
-集中查看任务属性、执行阶段、依赖关系和运行记录，也可以手动交给 Codex 或取消任务。
+Review task properties, execution stage, dependencies, and run history in one place. You can also hand a task to Codex manually or cancel it.
 
-![任务详情](docs/images/task-detail.png)
+![Task details](docs/images/task-detail.png)
 
-## 系统要求
+## Requirements
 
-- macOS 14 或更高版本，Apple Silicon（arm64）；当前不提供 Windows、Linux 或 Intel Mac 支持。
-- 已安装并登录的 Codex 桌面客户端。
-- 从源码运行：Python 3.13+、Node.js 22+ 和 npm。
-- 构建 App / DMG：额外需要 Xcode Command Line Tools、Rust 与 PyInstaller；Tauri CLI 已列入 npm 开发依赖。
+- macOS 14 or later on Apple Silicon (arm64); Windows, Linux, and Intel Macs are currently unsupported.
+- An installed and signed-in Codex desktop app.
+- For running from source: Python 3.13+, Node.js 22+, and npm.
+- For building the App / DMG: Xcode Command Line Tools, Rust, and PyInstaller are also required; the Tauri CLI is included in the npm development dependencies.
 
-## 快速开始
+## Quick start
 
 ```bash
 git clone https://github.com/Aurxs/codex-taskboard.git
@@ -67,13 +68,13 @@ npm ci
 python scripts/dev.py
 ```
 
-启动后，在 Codex 左侧栏点击「任务面板」。选择项目后创建任务，手动交给 Codex，或在自动化设置中启用自动认领。保留默认人工审阅时，执行结束后由你确认结果。
+After startup, click “Taskboard” in Codex’s sidebar. Select a project, create a task, hand it to Codex manually, or enable auto-claim in the automation settings. If you keep human review enabled, which is the default, confirm the result when execution finishes.
 
-如果当前 Codex 没有开放 CDP，启动器会先请求确认，再正常退出并以专用 profile 重新打开客户端。启动源码开发模式时，请保持终端运行。
+If the current Codex instance does not expose CDP, the launcher asks for confirmation, exits normally, and reopens the client with a dedicated profile. Keep the terminal running when using source development mode.
 
-## 开发
+## Development
 
-需要 Python 3.13、Node.js/npm；安装前后端依赖后，运行统一开发命令：
+Python 3.13 and Node.js/npm are required. After installing the backend and frontend dependencies, run the unified development command:
 
 ```bash
 python3 -m pip install -e .
@@ -81,9 +82,9 @@ npm install
 python3 scripts/dev.py
 ```
 
-该命令会在 loopback 上启动 FastAPI、根 `package.json` 中的 Vite 命令和 CDP 注入器。Taskboard 不提供独立工作窗口：启动器会在 Codex 侧边栏加入“任务面板”入口，点击后在 Codex 主内容区显示看板。嵌入 iframe 指向 Vite `5173`，`/api` 再由 Vite proxy 到 FastAPI `47823`；Codex App Server 只由后端调度器启动，`scripts/dev.py` 不会重复启动它。开发数据库为仓库内 `.data/`。
+This command starts FastAPI on loopback, the Vite command from the root `package.json`, and the CDP injector. Taskboard has no standalone work window: the launcher adds a “Taskboard” entry to the Codex sidebar, and clicking it shows the board in Codex’s main content area. The embedded iframe points to Vite `5173`, while `/api` is proxied by Vite to FastAPI `47823`; the Codex App Server is started only by the backend scheduler, and `scripts/dev.py` does not start another instance. The development database is `.data/` in the repository.
 
-常用选项：
+Common options:
 
 ```bash
 python3 scripts/dev.py --backend-only
@@ -91,51 +92,51 @@ python3 scripts/dev.py --no-injector
 python3 -m injector.cdp_injector --port 9229 --no-launch
 ```
 
-注入器会自动查找 `/Applications` 或 `~/Applications` 中已经安装的 ChatGPT.app/Codex.app。若现有 Codex 已开放 loopback CDP，会直接连接；若正在运行的普通 Codex 没有开放 CDP，菜单栏启动器会先提示用户确认，正常退出该实例，再以独立 profile 和专用 loopback 端口重新打开 Codex。这样用户当前看到的 Codex 就是被注入的实例，不会静默留下一个没有任务面板的旧窗口。`CODEX_TASKBOARD_CODEX_APP`、`CODEX_TASKBOARD_CODEX_PROFILE` 和 `CODEX_TASKBOARD_CDP_PORT` 仅作为开发调试覆盖项，正常使用无需填写路径或项目 key。
+The injector automatically looks for an installed ChatGPT.app/Codex.app in `/Applications/` or `~/Applications`. If an existing Codex instance exposes loopback CDP, it connects directly. If a running standard Codex instance does not expose CDP, the menu bar launcher asks for confirmation, exits that instance normally, and reopens Codex with a separate profile and dedicated loopback port. This ensures that the Codex instance currently visible to the user is the injected one without silently leaving an old window that lacks the Taskboard panel. `CODEX_TASKBOARD_CODEX_APP`, `CODEX_TASKBOARD_CODEX_PROFILE`, and `CODEX_TASKBOARD_CDP_PORT` are development and debugging overrides; normal use requires no path or project key.
 
-## 注入安全边界
+## Injection safety boundary
 
-`injector/cdp_injector.py` 只读取 `127.0.0.1` 的 CDP `/json/list`，并验证 WebSocket 仍然绑定到同一 loopback 端口。`injector/inject.js` 克隆 Codex 原生侧栏按钮，把 Taskboard page 挂载到 Codex 的主内容 surface，并观察 renderer 重建后重新挂载。项目名称、项目 id、真实工作目录和当前选择由 Codex renderer 的只读 host context 提供，再幂等同步到本地数据库；用户无需手工创建项目。注入器不会修改 `app.asar`、Codex 数据文件、React 模块或全局 `fetch`，也不会向 Codex turn 注入隐藏上下文。
+`injector/cdp_injector.py` reads only the CDP `/json/list` endpoint on `127.0.0.1` and verifies that the WebSocket remains bound to the same loopback port. `injector/inject.js` clones Codex’s native sidebar button, mounts the Taskboard page in Codex’s main content surface, and observes renderer rebuilds so it can mount the page again. The project name, project id, actual working directory, and current selection come from Codex’s read-only renderer host context and are idempotently synced to the local database; no manual project creation is required. The injector does not modify `app.asar`, Codex data files, React modules, or global `fetch`, and it does not inject hidden context into Codex turns.
 
-默认会请求 renderer 范围的 CDP CSP bypass，以便 loopback iframe 在 Codex 的 CSP 下加载；不需要时可以使用 `--no-csp-bypass`。该设置不写入 Codex 文件，且只作用于当前 CDP renderer。
+By default, the injector requests a renderer-scoped CDP CSP bypass so the loopback iframe can load under Codex’s CSP. Use `--no-csp-bypass` when it is unnecessary. This setting is not written to Codex files and applies only to the current CDP renderer.
 
-## 构建 macOS App 与 DMG
+## Building the macOS App and DMG
 
-打包还需要 Rust、Tauri CLI、PyInstaller 和 Apple Silicon macOS。先安装项目依赖，再执行：
+Packaging also requires Rust, the Tauri CLI, PyInstaller, and Apple Silicon macOS. Install the project dependencies first, then run:
 
 ```bash
 python -m pip install pyinstaller
 bash scripts/build_macos.sh
 ```
 
-`scripts/build_macos.sh` 会先运行 `npm run build:web`，再由 `build_sidecar.py` 校验 `dist/web/index.html` 并把整个 `dist/web` 与 `src/codex_taskboard` 收进 PyInstaller sidecar，最后执行 Tauri build。没有配置 Developer ID 时，脚本会使用完整的本地 ad-hoc 签名；该产物可用于本机测试，但没有经过 Apple 公证。打包态 sidecar 会在导入 FastAPI 前将 PyInstaller 的 `_MEIPASS/dist/web` 设置为 `CODEX_TASKBOARD_STATIC_DIR`，因此 iframe 仍然指向 loopback 的 FastAPI `47823`，不需要额外的静态文件服务器。开发运行时也会自动探测仓库根目录的 `dist/web`；如需覆盖可直接设置 `CODEX_TASKBOARD_STATIC_DIR`。
+`scripts/build_macos.sh` first runs `npm run build:web`. `build_sidecar.py` then verifies `dist/web/index.html` and packages the entire `dist/web` directory and `src/codex_taskboard` into the PyInstaller sidecar before running the Tauri build. Without a configured Developer ID, the script uses a full local ad-hoc signature; the artifact is suitable for local testing but has not been notarized by Apple. In the packaged sidecar, PyInstaller’s `_MEIPASS/dist/web` is assigned to `CODEX_TASKBOARD_STATIC_DIR` before FastAPI is imported, so the iframe still points to loopback FastAPI `47823` and no separate static file server is needed. Development runs also detect `dist/web` at the repository root automatically; set `CODEX_TASKBOARD_STATIC_DIR` to override it.
 
-Tauri 配置在 `src-tauri/tauri.conf.json`，shell 权限在 `src-tauri/capabilities/default.json`。启动器只显示 macOS 菜单栏图标，`LSUIElement` 与 `ActivationPolicy::Accessory` 共同确保它不常驻 Dock，也不会创建独立任务面板窗口。菜单可查看注入状态、在 Codex 中打开任务面板、重启服务、打开启动日志或退出。打开和停止命令通过应用支持目录中的本地 control mailbox 发送给 frozen sidecar；退出 Taskboard 不会顺带关闭用户的 Codex 窗口。未安装 Rust、Tauri CLI 或 PyInstaller 时，脚本会明确失败，不会声称已经生成 `.app`/DMG。
+The Tauri configuration is in `src-tauri/tauri.conf.json`, and shell permissions are in `src-tauri/capabilities/default.json`. The launcher only displays a macOS menu bar icon; `LSUIElement` and `ActivationPolicy::Accessory` keep it out of the Dock and prevent it from creating a standalone Taskboard window. The menu can show injection status, open Taskboard in Codex, restart the service, open the startup log, or quit. Open and stop commands are sent to the frozen sidecar through a local control mailbox in the application support directory; quitting Taskboard does not also close the user’s Codex window. If Rust, the Tauri CLI, or PyInstaller is missing, the script fails clearly instead of claiming that an `.app` or DMG was generated.
 
-构建脚本最后会执行 sidecar 冒烟检查。开发者也可按需手动运行以下检查：
+The build script ends with a sidecar smoke check. Developers can also run these checks manually:
 
 ```bash
 python3 scripts/check_packaging.py
 python3 scripts/check_sidecar_smoke.py --required
 ```
 
-`check_sidecar_smoke.py` 会用随机 loopback 端口启动冻结后的 sidecar，验证 `/health`，再通过同一 control mailbox 检查退出清理。最终的 Codex 重启确认、侧栏视觉效果、renderer 重建注入和卸载后数据保留仍需在 Apple Silicon macOS 图形会话中实机验证。
+`check_sidecar_smoke.py` starts the frozen sidecar on a random loopback port, verifies `/health`, and then uses the same control mailbox to check exit cleanup. Final confirmation of Codex restart behavior, sidebar appearance, renderer-rebuild injection, and data retention after uninstall still requires hands-on validation in a graphical Apple Silicon macOS session.
 
-## 数据与隐私
+## Data and privacy
 
-- 桌面版数据默认位于 `~/Library/Application Support/Codex Taskboard/`；源码开发模式使用仓库内 `.data/`。
-- 本地数据库、日志、浏览器 profile 和构建产物不上传到本仓库。
-- 任务由 Codex App Server 执行；「本地优先」指看板服务和数据存储在本机，并不意味着模型离线运行。
-- 不安装 Taskboard Skill、不使用 Scheduled Tasks，不覆盖 Codex 的 system/developer 指令、沙箱或审批设置。
+- Desktop data is stored by default in `~/Library/Application Support/Codex Taskboard/`; source development uses `.data/` in the repository.
+- The local database, logs, browser profiles, and build artifacts are not uploaded to this repository.
+- Tasks are executed by the Codex App Server. “Local-first” means the board service and data are stored on the local machine; it does not mean the model runs offline.
+- Taskboard does not install a Taskboard Skill, use Scheduled Tasks, or override Codex system/developer instructions, sandbox, or approval settings.
 
-## 架构
+## Architecture
 
-`src/codex_taskboard` 负责 SQLite schema/migrations、FastAPI API、SSE、调度器以及一个 Codex App Server 子进程。`web` 是只在 Codex 内嵌态提供完整功能的 React/Vite 看板。`injector` 是不依赖外部库的 Python CDP 控制器、宿主桥和 DOM 注入脚本。`src-tauri` 是无窗口启动器，只管理 Python sidecar 生命周期；看板始终显示在 Codex 内部。
+`src/codex_taskboard` handles the SQLite schema and migrations, FastAPI API, SSE, scheduler, and a Codex App Server child process. `web` is the React/Vite board that provides full functionality only when embedded in Codex. `injector` is a dependency-free Python CDP controller, host bridge, and DOM injection script. `src-tauri` is a windowless launcher that manages the Python sidecar lifecycle; the board is always shown inside Codex.
 
-所有公开 API 都在本地 loopback 上提供；状态写入使用版本字段进行乐观锁检查。`Interaction` 与 `blocking_scope` 为未来异步交互保留接口，但 v1 不启用 Astra 专属调度，不增加模型分支。
+All public APIs are served on local loopback. State writes use optimistic locking through version fields. `Interaction` and `blocking_scope` are reserved for future asynchronous interactions, but v1 does not enable Astra-specific scheduling or add model branches.
 
-## 来源与许可
+## Sources and license
 
-本项目保留 Apache-2.0 许可。看板视觉、Codex CDP 注入和桌面打包的实现思路参考了 [chuspeeism/dashi-taskboard](https://github.com/chuspeeism/dashi-taskboard)，详见 [NOTICE](NOTICE)。
+This project is licensed under Apache-2.0. The board visuals, Codex CDP injection, and desktop packaging approach were informed by [chuspeeism/dashi-taskboard](https://github.com/chuspeeism/dashi-taskboard); see [NOTICE](NOTICE) for details.
 
-应用图标复用本机 Codex 客户端的图标资源，相关图形与商标权利属于 OpenAI，不包含在本项目 Apache-2.0 代码许可授权中。
+The app icon reuses icon resources from the local Codex client. Related artwork and trademark rights belong to OpenAI and are not included in this project’s Apache-2.0 code license.
