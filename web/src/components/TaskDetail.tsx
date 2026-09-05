@@ -35,14 +35,19 @@ function CommandDetails({ item }: { item: ActivityItem }) {
   const executable = command.trim().match(/^(?:"([^"]+)"|'([^']+)'|(\S+))/);
   const program = executable?.[1] ?? executable?.[2] ?? executable?.[3] ?? "";
   const output = item.data?.aggregatedOutput ?? item.data?.output;
-  return <>
-    <p className="activity-command-heading"><strong>命令</strong><span title={program}>{program}</span>{item.status === "running" && <small>进行中</small>}</p>
-    <details>
-      <summary>展开详细</summary>
+  return <details className="activity-tool-details">
+      <summary><LinearIcon name="terminal" /><strong>命令</strong><span title={program}>{program}</span>{item.status === "running" && <small>进行中</small>}</summary>
       <div className="activity-command-box"><strong>命令</strong><pre>{command || "暂无命令"}</pre></div>
       <div className="activity-command-box"><strong>输出</strong><pre>{typeof output === "string" ? output || "暂无输出" : output == null ? "暂无输出" : JSON.stringify(output, null, 2)}</pre></div>
-    </details>
-  </>;
+    </details>;
+}
+
+function FileDetails({ item }: { item: ActivityItem }) {
+  return <details className="activity-tool-details">
+    <summary><LinearIcon name="fileChange" /><strong>文件修改</strong>{item.status === "running" && <small>进行中</small>}</summary>
+    <p>{item.message ?? item.summary ?? item.detail ?? ""}</p>
+    {item.data && <pre>{JSON.stringify(item.data, null, 2)}</pre>}
+  </details>;
 }
 
 function InteractionRow({ interaction, onResolve }: { interaction: Interaction; onResolve: (interaction: Interaction, response: unknown) => Promise<void> }) {
@@ -208,9 +213,9 @@ export function TaskDetail({
               {current.activityError && <p className="activity-empty">{current.activityError}</p>}
               <div className="activity-stream">
                 {current.lastError && <div className="activity-entry"><span className="activity-rail-icon"><LinearIcon name="alert" /></span><p><strong>执行错误</strong> {current.lastError}</p><time>{relativeTime(current.updatedAt)}</time></div>}
-                {current.lastMessage && !(current.activity ?? []).some(item => item.kind === "agentMessage" && item.message === current.lastMessage) && <div className="activity-entry"><span className="activity-rail-icon">✦</span><p><strong>Codex</strong> {current.lastMessage}</p><time>{relativeTime(current.updatedAt)}</time></div>}
-                {(current.activity ?? []).map((item, index) => <div className="activity-entry" key={item.id ?? `${item.createdAt}-${index}`}><span className="activity-rail-icon">{item.kind === "agentMessage" ? "✦" : "↗"}</span><div className="activity-content">{item.kind === "commandExecution" ? <CommandDetails item={item} /> : <><p><strong>{activityLabel(item.kind)}</strong>{item.status === "running" && <small> · 进行中</small>}</p><p>{item.message ?? item.summary ?? item.detail ?? ""}</p>{item.data && !["agentMessage", "userMessage"].includes(item.kind ?? "") && <details><summary>查看调用详情</summary><pre>{JSON.stringify(item.data, null, 2)}</pre></details>}</>}</div><time>{relativeTime(item.createdAt)}</time></div>)}
-                {current.runs?.map((run, index) => <div className="activity-entry" key={run.id ?? `run-${index}`}><span className="activity-rail-icon"><LinearIcon name="terminal" /></span><p><strong>TaskRun</strong> {run.lastOutputSummary ?? run.summary ?? run.phase ?? run.runState ?? run.state ?? "运行记录"}</p><time>{relativeTime(run.updatedAt ?? run.createdAt)}</time></div>)}
+                {current.lastMessage && !(current.activity ?? []).some(item => item.kind === "agentMessage" && item.message === current.lastMessage) && <div className="activity-entry activity-agent-message"><span className="activity-rail-icon">✦</span><p><strong>Codex</strong> {current.lastMessage}</p><time>{relativeTime(current.updatedAt)}</time></div>}
+                {[...(current.activity ?? [])].reverse().map((item, index) => <div className={`activity-entry${item.kind === "agentMessage" ? " activity-agent-message" : ""}${["commandExecution", "fileChange"].includes(item.kind) ? " activity-tool-entry" : ""}`} key={item.id ?? `${item.createdAt}-${index}`}><span className="activity-rail-icon">{item.kind === "agentMessage" ? "✦" : "↗"}</span><div className="activity-content">{item.kind === "commandExecution" ? <CommandDetails item={item} /> : item.kind === "fileChange" ? <FileDetails item={item} /> : <><p><strong>{activityLabel(item.kind)}</strong>{item.status === "running" && <small> · 进行中</small>}</p><p>{item.message ?? item.summary ?? item.detail ?? ""}</p>{item.data && !["agentMessage", "userMessage"].includes(item.kind ?? "") && <details><summary>查看调用详情</summary><pre>{JSON.stringify(item.data, null, 2)}</pre></details>}</>}</div><time>{relativeTime(item.createdAt)}</time></div>)}
+                {[...(current.runs ?? [])].reverse().map((run, index) => <div className="activity-entry" key={run.id ?? `run-${index}`}><span className="activity-rail-icon"><LinearIcon name="terminal" /></span><p><strong>TaskRun</strong> {run.lastOutputSummary ?? run.summary ?? run.phase ?? run.runState ?? run.state ?? "运行记录"}</p><time>{relativeTime(run.updatedAt ?? run.createdAt)}</time></div>)}
                 {current.lastError == null && current.lastMessage == null && (current.activity ?? []).length === 0 && (!current.runs || current.runs.length === 0) && <p className="activity-empty">Codex 开始工作后，最新进展会显示在这里。</p>}
               </div>
               {pendingInteractions.length > 0 && <div className="interaction-list">{pendingInteractions.map((interaction) => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</div>}

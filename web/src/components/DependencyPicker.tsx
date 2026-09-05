@@ -7,7 +7,8 @@ export function DependencyPicker({ candidates, value, onChange }: { candidates: 
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const [search, setSearch] = useState("");
-  const available = candidates.filter(task => `${task.identifier} ${task.title}`.toLowerCase().includes(search.toLowerCase()));
+  const available = candidates.filter(task => `${task.identifier} ${task.title}`.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   return <div className="dependency-picker">
     <button ref={trigger} type="button" className="property-control dependency-trigger" aria-label="阻塞于" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>阻塞于 <span>{value.length || "无"}</span><LinearIcon name="chevronDown" className="picker-chevron" /></button>
     <FloatingPopover open={open} anchor={trigger} onClose={() => setOpen(false)} label="选择前置任务" width={340}>

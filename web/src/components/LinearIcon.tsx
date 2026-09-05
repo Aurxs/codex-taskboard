@@ -7,6 +7,7 @@ import type { ReactNode, SVGProps } from "react";
  * without bringing the original product's feature modules back in.
  */
 const ICONS = {
+  fileChange: { content: <g fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5H3v13h10v-9L9 1.5Z M9 1.5v4h4 M5 10h6 M8 7v6" /></g> },
   plus: { content: <path d="M7.25 2.75a.75.75 0 0 1 1.5 0v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5z" /> },
   alert: { content: <path fillRule="evenodd" d="M8 15A7 7 0 1 0 8 1a7 7 0 0 0 0 14M7.026 4.525a.5.5 0 0 1 .5-.525h.948a.5.5 0 0 1 .5.525l-.2 4a.5.5 0 0 1-.5.475h-.548a.5.5 0 0 1-.5-.475zM7 11a1 1 0 1 1 2 0 1 1 0 0 1-2 0" clipRule="evenodd" /> },
   check: { content: <path d="M6.336 13.6a1.049 1.049 0 0 1-.8-.376L2.632 9.736a.992.992 0 0 1 .152-1.424 1.056 1.056 0 0 1 1.456.152l2.008 2.4 5.448-8a1.048 1.048 0 0 1 1.432-.288A.992.992 0 0 1 13.424 4L7.2 13.144a1.04 1.04 0 0 1-.8.456h-.064Z" /> },
