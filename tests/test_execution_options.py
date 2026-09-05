@@ -20,6 +20,10 @@ class ExecutionOptionsTests(unittest.IsolatedAsyncioTestCase):
             task = db.create_task(project_id=project["id"], title="Existing task")
             db._conn.execute("ALTER TABLE tasks DROP COLUMN model")
             db._conn.execute("ALTER TABLE tasks DROP COLUMN reasoning_effort")
+            # A v2 fixture must not retain tables added by later migrations.
+            db._conn.execute("DROP TABLE task_activity")
+            db._conn.execute("DROP TABLE task_attachments")
+            db._conn.execute("ALTER TABLE tasks DROP COLUMN completed_at")
             db._conn.execute("UPDATE schema_meta SET version = 2")
             db.close()
             db = Database(path)

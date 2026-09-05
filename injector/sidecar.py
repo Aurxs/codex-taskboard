@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Packaged Python sidecar for the Tauri shell.
 
-The backend owns the Codex App Server process.  This sidecar only starts the
-FastAPI application in-process and runs the loopback CDP injector; it never
-starts a second App Server.  Keeping that ownership in the backend also makes
-the development and packaged paths use the same lifecycle code.
+The backend and injector share an in-process transport to the desktop's
+existing App Server. Backend-only diagnostics can still use a stdio server.
 """
 
 from __future__ import annotations
@@ -120,15 +118,18 @@ class BackendRuntime:
             self.thread.join(timeout=min(2.0, timeout))
 
 
-def start_backend(host: str, port: int, data_dir: Path) -> BackendRuntime:
+def start_backend(host: str, port: int, data_dir: Path, injector=None) -> BackendRuntime:
     # Set the environment before importing the application.  The module-level
     # FastAPI app constructs its database and scheduler during import.
     os.environ["CODEX_TASKBOARD_HOST"] = host
     os.environ["CODEX_TASKBOARD_PORT"] = str(port)
     os.environ["CODEX_TASKBOARD_DATA_DIR"] = str(data_dir)
-    # The backend, not this launcher, is the sole owner of app-server startup.
+    # Normal launches share the desktop service; backend-only diagnostics
+    # retain the explicit stdio transport.
     os.environ["CODEX_TASKBOARD_APP_SERVER_OWNER"] = "backend"
     os.environ["CODEX_TASKBOARD_MANAGE_APP_SERVER"] = "1"
+    if injector is not None:
+        os.environ["CODEX_TASKBOARD_DESKTOP_TRANSPORT"] = "1"
     static_root = static_directory()
     if static_root is not None:
         os.environ["CODEX_TASKBOARD_STATIC_DIR"] = str(static_root)
@@ -144,6 +145,11 @@ def start_backend(host: str, port: int, data_dir: Path) -> BackendRuntime:
             "run `python -m pip install -e .` during development. "
             f"Import failed with {exc.__class__.__name__}: {exc}"
         ) from exc
+
+    if injector is not None:
+        app.state.scheduler.server.transport = injector.native_request
+        app.state.scheduler.server.available = injector.native_connected
+        injector.native_event_handler = app.state.scheduler.server.receive
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info", lifespan="on")
     server = uvicorn.Server(config)
@@ -246,25 +252,21 @@ def main(argv: list[str] | None = None) -> int:
                 daemon=True,
             )
             control_watcher.start()
+        if not args.no_injector:
+            injector = CdpInjector(
+                port=args.cdp_port, taskboard_url=taskboard_url,
+                app_path=args.codex_app,
+                profile_path=args.profile or data_dir / "codex-profile",
+                launch=True, bypass_csp=not args.no_csp_bypass,
+            )
         if not args.no_server:
-            backend = start_backend(args.host, args.port, data_dir)
-            wait_for_backend(taskboard_url)
+            backend = start_backend(args.host, args.port, data_dir, injector)
+            wait_for_backend(f"http://127.0.0.1:{args.port}")
             _emit("backend_ready", host=args.host, port=args.port, url=taskboard_url)
         if args.no_injector:
             while backend and backend.thread.is_alive() and not shutdown_requested.wait(1):
                 pass
             return 0
-        injector = CdpInjector(
-            port=args.cdp_port,
-            taskboard_url=taskboard_url,
-            app_path=args.codex_app,
-            # Keep the managed Codex session persistent across launches so
-            # its login/browser state survives a Taskboard restart.  An
-            # explicit --profile remains a developer-only override.
-            profile_path=args.profile or data_dir / "codex-profile",
-            launch=True,
-            bypass_csp=not args.no_csp_bypass,
-        )
         if pending_open.is_set():
             injector.request_open()
         return injector.run()

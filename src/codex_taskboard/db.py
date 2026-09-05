@@ -652,6 +652,8 @@ class Database:
                                           (task_id, item["id"])).fetchone()
             if existing:
                 previous = json.loads(existing["payload"])
+                if previous.get("status") == "completed" and item.get("status") == "running":
+                    return
                 item = {**item, "data": {**previous.get("data", {}), **item.get("data", {})}}
             self._conn.execute(
                 """INSERT INTO task_activity(task_id, id, payload, created_at) VALUES (?, ?, ?, ?)
@@ -853,7 +855,9 @@ class Database:
                     raise ValidationError("最多 10 个附件，合计最多 20 MB")
             if priority == "draft":
                 current = self._conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
-                if current is not None and current["status"] == "in_progress":
+                if current is not None and current["status"] == "in_progress" and not (
+                    status == "todo" and run_state is None
+                ):
                     raise ValidationError("请先暂停任务，再将其设为草稿")
             cursor = self._conn.execute(
                 f"UPDATE tasks SET {assignments}, version = version + 1 WHERE id = ? AND version = ?",
@@ -1127,7 +1131,7 @@ class Database:
         assignments = ", ".join(f"{column} = ?" for column in values)
         with self.transaction(immediate=True):
             row = self._conn.execute(
-                "SELECT id FROM task_runs WHERE task_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1",
+                "SELECT id FROM task_runs WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 (task_id,),
             ).fetchone()
             if row is None:
@@ -1141,7 +1145,7 @@ class Database:
     def latest_run(self, task_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM task_runs WHERE task_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1",
+                "SELECT * FROM task_runs WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 (task_id,),
             ).fetchone()
             return self._run_json(row) if row else None

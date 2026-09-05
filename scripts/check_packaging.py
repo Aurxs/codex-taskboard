@@ -31,6 +31,8 @@ def main() -> int:
     build_script = (ROOT / "scripts" / "build_sidecar.py").read_text(encoding="utf-8")
     assert '"--paths"' in build_script and 'ROOT / "src"' in build_script
     assert build_script.count('"--collect-submodules"') >= 2
+    assert "native_messages.js" in build_script
+    assert (ROOT / "injector" / "native_messages.js").is_file()
     mask = bytes.fromhex("01020304")
     for length in (0, 125, 126, 65_535, 65_536):
         payload = bytes((index % 251 for index in range(length)))

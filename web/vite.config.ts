@@ -22,7 +22,7 @@ export default defineConfig({
       origin: ["null", "http://127.0.0.1:5173", "http://localhost:5173"],
     },
     proxy: {
-      "/api": "http://127.0.0.1:47823",
+      "/api": `http://127.0.0.1:${process.env.CODEX_TASKBOARD_PORT || "47823"}`,
     },
   },
 });

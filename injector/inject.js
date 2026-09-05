@@ -631,10 +631,11 @@
     if (!message || typeof message !== "object" || message.capability !== frameCapability) return;
     if (message.type === "taskboard:frame-awaiting-challenge") { postFrameChallenge(); return; }
     if (!frameChallenge || message.challenge !== frameChallenge) return;
-    if (message.type === "taskboard:thread-available") {
-      const thread = message.payload?.thread;
-      if (thread && typeof thread.id === "string" && typeof thread.cwd === "string") {
-        window.postMessage({ type: "mcp-notification", hostId: "local", method: "thread/started", params: { thread } }, window.location.origin);
+    if (message.type === "taskboard:open-thread") {
+      const threadId = message.payload?.threadId;
+      if (typeof threadId === "string" && /^[A-Za-z0-9_-]+$/.test(threadId)) {
+        closeTaskboard(false);
+        window.electronBridge?.sendMessageFromView({ type: "open-in-browser", url: `codex://threads/${encodeURIComponent(threadId)}`, originHostId: "local" });
       }
       return;
     }

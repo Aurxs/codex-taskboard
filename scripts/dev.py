@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Run the local Taskboard stack with one Ctrl-C lifecycle.
 
-The FastAPI backend is the only component allowed to create the Codex App
-Server child process.  This supervisor starts the backend, Vite (when present),
-and the loopback injector, but never starts a second App Server of its own.
+The regular development stack uses the same desktop transport as the packaged
+sidecar. Backend-only diagnostics can still run an isolated stdio App Server.
 """
 
 from __future__ import annotations
@@ -131,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     start_backend = not args.web_only and not args.injector_only
     start_web = not args.backend_only and not args.injector_only and not args.no_web
     start_injector = not args.backend_only and not args.web_only and not args.no_injector
+    shared_backend = start_backend and start_injector
     children: list[subprocess.Popen[bytes]] = []
     stopping = False
     web_started = False
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     try:
-        if start_backend:
+        if start_backend and not shared_backend:
             children.append(
                 _spawn(
                     [sys.executable, "-m", "uvicorn", "codex_taskboard.app:app", "--host", args.host, "--port", str(args.port)],
@@ -180,14 +180,13 @@ def main(argv: list[str] | None = None) -> int:
                 web_started = True
         if start_injector:
             injector_url = web_url if web_started else env["CODEX_TASKBOARD_URL"]
+            command = [sys.executable, "-m", "injector.sidecar", "--host", args.host,
+                       "--port", str(args.port), "--cdp-port", str(args.cdp_port)] if shared_backend else [
+                           sys.executable, "-m", "injector.cdp_injector", "--port", str(args.cdp_port)]
             children.append(
                 _spawn(
                     [
-                        sys.executable,
-                        "-m",
-                        "injector.cdp_injector",
-                        "--port",
-                        str(args.cdp_port),
+                        *command,
                         "--taskboard-url",
                         injector_url,
                         *(["--no-csp-bypass"] if args.no_csp_bypass else []),
@@ -196,6 +195,10 @@ def main(argv: list[str] | None = None) -> int:
                     label="loopback Codex CDP injector",
                 )
             )
+            if shared_backend and not wait_for_backend(env["CODEX_TASKBOARD_URL"]):
+                print("Taskboard backend did not become ready", file=sys.stderr)
+                stop()
+                return 1
         if not children:
             print("Nothing to run", file=sys.stderr)
             return 2

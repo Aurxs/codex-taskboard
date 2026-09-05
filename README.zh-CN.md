@@ -37,7 +37,7 @@ Codex Taskboard 是一个运行在 Codex 内部的本地任务看板：整理需
 
 创建时可附加 PNG、JPEG、GIF、WebP 图片及 Markdown 文档，支持移除待上传文件；最多 10 个附件，单个最多 10 MB、合计最多 20 MB。附件随任务保存，在详情中下载，执行时通过本地文件路径提供给 Codex。
 
-尚未构思完成的任务可选择「草稿」优先级。草稿保存在待认领列表，不会自动认领或直接运行；将优先级改为其他等级后即可发布。正在执行的任务需先暂停才能改为草稿。
+尚未构思完成的任务可选择「草稿」优先级。草稿保存在待认领列表，不会自动认领或直接运行；将优先级改为其他等级后即可发布。「暂停并退回草稿」会中断当前回合并保留原会话，暂停后不会被自动认领。
 
 ![创建任务与执行选项](docs/images/task-controls.png)
 
@@ -50,6 +50,10 @@ Codex Taskboard 是一个运行在 Codex 内部的本地任务看板：整理需
 ### 在详情中查看状态与执行记录
 
 集中查看任务属性、执行阶段、依赖关系和运行记录，也可以手动交给 Codex 或取消任务。
+
+执行中、等你确认和已完成的任务，详情左侧底部都有固定的跟进输入框。执行中发送的文字会补充到当前回合，结束后会继续原会话；Enter 发送，Shift+Enter 换行，发送失败保留输入。长描述编辑和执行记录可以独立滚动。点击「在 Codex 中打开」可进入原生对话，在 Codex 中发送的用户消息、后续回复和状态也会同步回来。
+
+常规启动与开发模式共用 Codex 桌面已有的会话服务，不伪造原生通知、不修改原生输入框或会话界面。实时事件同步之外，每 5 秒核对最新回合，弥补重连时遗漏的事件。升级后需重新启动启动器以加载新代码；`--backend-only` / `--no-injector` 诊断模式仍使用独立 stdio 服务，不提供原生双向同步。
 
 ![任务详情](docs/images/task-detail.png)
 
@@ -86,7 +90,7 @@ npm install
 python3 scripts/dev.py
 ```
 
-该命令会在 loopback 上启动 FastAPI、根 `package.json` 中的 Vite 命令和 CDP 注入器。Taskboard 不提供独立工作窗口：启动器会在 Codex 侧边栏加入“任务面板”入口，点击后在 Codex 主内容区显示看板。嵌入 iframe 指向 Vite `5173`，`/api` 再由 Vite proxy 到 FastAPI `47823`；Codex App Server 只由后端调度器启动，`scripts/dev.py` 不会重复启动它。开发数据库为仓库内 `.data/`。
+该命令会在 loopback 上启动 Vite 和共享 sidecar（FastAPI＋CDP 注入器）。Taskboard 不提供独立工作窗口：启动器会在 Codex 侧边栏加入“任务面板”入口，点击后在 Codex 主内容区显示看板。嵌入 iframe 指向 Vite `5173`，`/api` 再由 Vite proxy 到 FastAPI `47823`；sidecar 通过桌面现有消息通道使用同一个 Codex App Server，不另起会话服务。开发数据库为仓库内 `.data/`。
 
 常用选项：
 
@@ -135,7 +139,7 @@ python3 scripts/check_sidecar_smoke.py --required
 
 ## 架构
 
-`src/codex_taskboard` 负责 SQLite schema/migrations、FastAPI API、SSE、调度器以及一个 Codex App Server 子进程。`web` 是只在 Codex 内嵌态提供完整功能的 React/Vite 看板。`injector` 是不依赖外部库的 Python CDP 控制器、宿主桥和 DOM 注入脚本。`src-tauri` 是无窗口启动器，只管理 Python sidecar 生命周期；看板始终显示在 Codex 内部。
+`src/codex_taskboard` 负责 SQLite schema/migrations、FastAPI API、SSE、调度器和 Codex 会话协议客户端。`web` 是只在 Codex 内嵌态提供完整功能的 React/Vite 看板。`injector` 提供 Python CDP 控制器、被动原生消息读取和看板宿主桥。`src-tauri` 是无窗口启动器，只管理 Python sidecar 生命周期；看板始终显示在 Codex 内部。
 
 所有公开 API 都在本地 loopback 上提供；状态写入使用版本字段进行乐观锁检查。`Interaction` 与 `blocking_scope` 为未来异步交互保留接口，但 v1 不启用 Astra 专属调度，不增加模型分支。
 

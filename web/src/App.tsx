@@ -346,7 +346,6 @@ function EmbeddedTaskboard() {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const close = createEventStream((event: EventEnvelope) => {
-      if (event.type === "thread.available") postEmbeddedHostMessage({ type: "taskboard:thread-available", payload: event.payload });
       if (event.projectId && selectedProjectId && event.projectId !== selectedProjectId) return;
       if (!timer) timer = setTimeout(() => {
         timer = undefined;
@@ -452,7 +451,7 @@ function EmbeddedTaskboard() {
       return;
     }
     if (task.status === "in_progress" && status === "todo") {
-      if (window.confirm("这会先中断当前 turn，并保留 thread 重新排队。继续吗？")) await performAction(task, "interrupt_requeue");
+      if (window.confirm("这会暂停当前执行并将任务退回草稿，保留原会话。继续吗？")) await performAction(task, "interrupt_requeue");
       return;
     }
     if (task.status === "in_progress" && status === "in_review") {

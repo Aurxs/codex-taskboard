@@ -51,6 +51,10 @@ Select prerequisite tasks under “Blocked by” to split work that must happen 
 
 Review task properties, execution stage, dependencies, and run history in one place. You can also hand a task to Codex manually or cancel it.
 
+Running, review, and completed tasks have a pinned follow-up composer in the left detail panel. Messages steer an active turn or continue the same thread after completion. Enter sends; Shift+Enter adds a line; failed sends retain the draft. Long descriptions and history scroll independently. “Open in Codex” opens the native conversation; native follow-up messages, replies, and turn status sync back to the board.
+
+Normal development and packaged launches share the desktop's existing App Server without synthetic native notifications or changes to its composer. Live events are backed by a latest-turn check every five seconds. Pause interrupts the turn and returns the task to draft priority, preventing automatic re-claim. Restart the launcher after upgrading to load these changes. Backend-only / no-injector diagnostic modes retain an isolated stdio server and do not provide native bidirectional sync.
+
 ![Task details](docs/images/task-detail.png)
 
 ## Requirements
@@ -86,7 +90,7 @@ npm install
 python3 scripts/dev.py
 ```
 
-This command starts FastAPI on loopback, the Vite command from the root `package.json`, and the CDP injector. Taskboard has no standalone work window: the launcher adds a “Taskboard” entry to the Codex sidebar, and clicking it shows the board in Codex’s main content area. The embedded iframe points to Vite `5173`, while `/api` is proxied by Vite to FastAPI `47823`; the Codex App Server is started only by the backend scheduler, and `scripts/dev.py` does not start another instance. The development database is `.data/` in the repository.
+This command starts Vite and a shared sidecar containing FastAPI and the CDP injector. Taskboard has no standalone work window: the launcher adds a “Taskboard” entry to the Codex sidebar, and clicking it shows the board in Codex’s main content area. The embedded iframe points to Vite `5173`, while `/api` is proxied to FastAPI `47823`. The sidecar uses the desktop's existing App Server through its message bridge. The development database is `.data/` in the repository.
 
 Common options:
 
@@ -135,7 +139,7 @@ python3 scripts/check_sidecar_smoke.py --required
 
 ## Architecture
 
-`src/codex_taskboard` handles the SQLite schema and migrations, FastAPI API, SSE, scheduler, and a Codex App Server child process. `web` is the React/Vite board that provides full functionality only when embedded in Codex. `injector` is a dependency-free Python CDP controller, host bridge, and DOM injection script. `src-tauri` is a windowless launcher that manages the Python sidecar lifecycle; the board is always shown inside Codex.
+`src/codex_taskboard` handles SQLite, FastAPI, SSE, scheduling, and the Codex protocol client. `web` is the React/Vite board that provides full functionality only when embedded in Codex. `injector` provides the CDP controller, passive native-message reader, and board host bridge. `src-tauri` is a windowless launcher that manages the Python sidecar lifecycle; the board is always shown inside Codex.
 
 All public APIs are served on local loopback. State writes use optimistic locking through version fields. `Interaction` and `blocking_scope` are reserved for future asynchronous interactions, but v1 does not enable Astra-specific scheduling or add model branches.
 

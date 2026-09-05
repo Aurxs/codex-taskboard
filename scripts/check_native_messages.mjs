@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
+
+const window = { location: { origin: 'app://-' } };
+const decode = vm.runInNewContext(`(${await readFile('injector/native_messages.js', 'utf8')})`, { window });
+const messages = [];
+const receive = decode(message => messages.push(message));
+const emit = data => receive({ data, source: null, origin: '' });
+emit({ type: 'mcp-notification', method: 'turn/completed' });
+assert.equal(messages[0].method, 'turn/completed', 'native IPC uses null source');
+receive({ data: { type: 'mcp-request' }, source: {}, origin: 'null' });
+assert.equal(messages.length, 1, 'child frames cannot impersonate native IPC');
+let sequence = 0;
+const chunk = (kind, tokens) => emit({ marker: 'codex-host-chunked-message-v1', transferId: 'test', sequence: sequence++, kind, tokens });
+chunk('start');
+chunk('chunk', [{ type: 'object-start' }, { type: 'key', value: 'type' }, { type: 'value', value: 'mcp-response' }, { type: 'key', value: 'message' }, { type: 'object-start' }, { type: 'key', value: 'id' }, { type: 'value', value: 'taskboard-id' }, { type: 'key', value: 'result' }, { type: 'string-start', target: 'value' }]);
+chunk('chunk', [{ type: 'string-chunk', value: 'long '.repeat(15000) }]);
+chunk('chunk', [{ type: 'string-chunk', value: 'history' }, { type: 'string-end' }, { type: 'container-end' }, { type: 'container-end' }]);
+chunk('end');
+assert.equal(messages[1].message.id, 'taskboard-id');
+assert.equal(messages[1].message.result.length, 75007);
+chunk('start');
+sequence++;
+chunk('chunk', [{ type: 'value', value: 'broken' }]);
+chunk('end');
+assert.equal(messages.length, 2, 'missing chunks must never yield partial state');
+console.log('PASS: native IPC, frame isolation, long chunked history, missing-chunk rejection');

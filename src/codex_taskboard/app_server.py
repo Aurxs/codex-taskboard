@@ -371,6 +371,12 @@ class CodexAppServer:
             "turn/interrupt", {"threadId": thread_id, "turnId": turn_id}, timeout=20
         )
 
+    async def steer_turn(self, thread_id: str, turn_id: str, text: str) -> Any:
+        return await self.request("turn/steer", {
+            "threadId": thread_id, "expectedTurnId": turn_id,
+            "input": [{"type": "text", "text": text}],
+        }, timeout=30)
+
     async def read_rate_limits(self) -> Any:
         response = await self.request("account/rateLimits/read", {}, timeout=20)
         return {

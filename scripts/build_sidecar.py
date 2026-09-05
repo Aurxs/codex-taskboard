@@ -71,6 +71,8 @@ def build(*, target: str, skip_copy: bool = False) -> Path:
         "--add-data",
         f"{ROOT / 'injector' / 'inject.js'}{os.pathsep}injector",
         "--add-data",
+        f"{ROOT / 'injector' / 'native_messages.js'}{os.pathsep}injector",
+        "--add-data",
         f"{static_root}{os.pathsep}dist/web",
         "--hidden-import",
         "uvicorn",

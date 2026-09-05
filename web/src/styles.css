@@ -12008,7 +12008,19 @@ kbd {
 .composer-properties .dependency-picker-panel { margin-top: 8px; }
 .execution-settings select { height: 34px; padding: 0 9px; font-size: 12px; border-radius: 7px; }
 .execution-settings > label { gap: 5px; }
-.app-shell .issue-detail-layout { gap: 28px; padding: 24px 28px 32px; }
+.app-shell .issue-detail-scroll { flex: 1; overflow: hidden; }
+.app-shell .issue-detail-layout { display: grid; gap: 28px; padding: 24px 28px 20px; height: 100%; min-height: 0; align-items: stretch; }
+.app-shell .issue-detail-main { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.issue-detail-main-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; padding-right: 8px; }
+.app-shell .issue-description-input { overflow: auto; max-height: 50vh; resize: vertical; }
+.app-shell .issue-properties { min-height: 0; overflow: auto; position: static; scrollbar-width: thin; }
+.task-followup { flex-shrink: 0; margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg); box-shadow: 0 2px 8px #00000008; }
+.task-followup textarea { display: block; width: 100%; min-height: 58px; max-height: 160px; resize: vertical; overflow: auto; padding: 2px 4px; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 22px; }
+.task-followup-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; }
+.task-followup-footer span { color: var(--text-tertiary); font-size: 11px; }
+.task-followup-footer button { width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--text-primary); color: var(--bg); font-size: 22px; cursor: pointer; }
+.task-followup-footer button:disabled { opacity: .35; cursor: default; }
+@media (max-width: 760px) { .app-shell .issue-detail-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(200px, 1fr) auto; } .app-shell .issue-properties { max-height: 180px; order: 0; } }
 .app-shell .issue-editor { padding: 0 0 18px; }
 .app-shell .issue-editor-content { transform: none; }
 .app-shell .issue-description-read { min-height: 72px; }

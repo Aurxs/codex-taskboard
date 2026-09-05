@@ -9,6 +9,7 @@ import { PriorityIcon, ProjectIcon, StatusIcon } from "./SemanticIcons";
 import { ExecutionSettings } from "./ExecutionSettings";
 import { IssueRelations } from "./IssueRelations";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
+import { postEmbeddedHostMessage } from "../embeddedHost.mjs";
 
 function relativeTime(value?: string | null) {
   if (!value) return "";
@@ -23,6 +24,10 @@ function relativeTime(value?: string | null) {
 
 function plainMarkdown(value: string) {
   return value.replace(/```[\s\S]*?```/g, "").replace(/!\[[^\]]*\]\([^)]*\)/g, "").replace(/[`*_>#-]/g, "").trim();
+}
+
+function activityLabel(kind?: string) {
+  return kind === "agentMessage" ? "Codex" : kind === "userMessage" ? "用户" : kind === "fileChange" ? "文件变化" : "工具调用";
 }
 
 function CommandDetails({ item }: { item: ActivityItem }) {
@@ -90,7 +95,7 @@ export function TaskDetail({
   onBack: () => void;
   onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">> & { attachments?: import("../types").AttachmentInput[] })) => Promise<Task | null>;
   onDependencies: (task: Task, ids: string[]) => Promise<Task | null>;
-  onAction: (task: Task, action: "run" | "retry" | "interrupt_requeue" | "submit_review_feedback" | "complete" | "cancel", feedback?: string, targetStatus?: "in_review" | "done") => Promise<Task | null>;
+  onAction: (task: Task, action: "run" | "retry" | "interrupt_requeue" | "submit_review_feedback" | "complete" | "cancel" | "follow_up", feedback?: string, targetStatus?: "in_review" | "done") => Promise<Task | null>;
   onResolveInteraction: (interaction: Interaction, response: unknown) => Promise<void>;
 }) {
   const [current, setCurrent] = useState(task);
@@ -103,6 +108,22 @@ export function TaskDetail({
   const [feedback, setFeedback] = useState("");
   const [saving, setSaving] = useState(false);
   const [propertyOpen, setPropertyOpen] = useState(false);
+  const [followup, setFollowup] = useState("");
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  async function sendFollowup() {
+    if (!followup.trim() || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    const text = followup;
+    try {
+      const next = await onAction(current, "follow_up", text.trim());
+      if (next) {
+        setCurrent(previous => next.version >= previous.version ? next : previous);
+        setFollowup(value => value === text ? "" : value);
+      }
+    } finally { sendingRef.current = false; setSending(false); }
+  }
 
   const [previewFile, setPreviewFile] = useState<import("../types").TaskAttachment | null>(null);
   useEffect(() => setPreviewFile(null), [task.id]);
@@ -164,6 +185,7 @@ export function TaskDetail({
       <div className="issue-detail-scroll">
         <div className="issue-detail-layout">
           <div className="issue-detail-main">
+            <div className="issue-detail-main-scroll">
             <div className="issue-editor">
               <div className="issue-editor-content" onPaste={event => { void addFiles(pastedFiles(event)); }}>
                 <textarea className="issue-title-input" rows={1} value={title} disabled={saving} onChange={(event) => { dirty.current.title = true; drafts.current.title = event.target.value; setTitle(event.target.value); }} onBlur={() => { if (title.trim() && title.trim() !== current.title) { drafts.current.title = title.trim(); setTitle(title.trim()); void save({ title: title.trim() }); } }} />
@@ -174,7 +196,7 @@ export function TaskDetail({
                   <span className="property-control"><StatusIcon status={current.status === "canceled" ? "todo" : current.status as TaskStatus} size={14} /><span>{current.status === "canceled" ? "已取消" : STATUS_LABELS[current.status as TaskStatus] ?? current.status}</span></span>
                   <DependencyPicker candidates={tasks.filter(item => item.id !== current.id && item.status !== "canceled")} value={current.blockedBy.map(item => item.id)} onChange={ids => void dependencyChange(ids)} />
                   <AttachmentButton count={current.attachments?.length ?? 0} disabled={saving || addingAttachments} onAdd={files => void addFiles(files)} />
-                  {current.threadId && <span className="property-control"><ProjectIcon size={14} /><span>Codex thread</span></span>}
+                  {current.threadId && <button type="button" className="property-control" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: current.threadId } })}><ProjectIcon size={14} /><span>在 Codex 中打开</span></button>}
                 </div>
                 {current.priority === "draft" && <p className="composer-draft-note">草稿不会被 Codex 认领，修改优先级后即可发布。</p>}
                 {addingAttachments && <p className="composer-draft-note" role="status">正在添加附件…</p>}
@@ -187,12 +209,17 @@ export function TaskDetail({
               <div className="activity-stream">
                 {current.lastError && <div className="activity-entry"><span className="activity-rail-icon"><LinearIcon name="alert" /></span><p><strong>执行错误</strong> {current.lastError}</p><time>{relativeTime(current.updatedAt)}</time></div>}
                 {current.lastMessage && !(current.activity ?? []).some(item => item.kind === "agentMessage" && item.message === current.lastMessage) && <div className="activity-entry"><span className="activity-rail-icon">✦</span><p><strong>Codex</strong> {current.lastMessage}</p><time>{relativeTime(current.updatedAt)}</time></div>}
-                {(current.activity ?? []).map((item, index) => <div className="activity-entry" key={item.id ?? `${item.createdAt}-${index}`}><span className="activity-rail-icon">{item.kind === "agentMessage" ? "✦" : "↗"}</span><div className="activity-content">{item.kind === "commandExecution" ? <CommandDetails item={item} /> : <><p><strong>{item.kind === "agentMessage" ? "Codex" : item.kind === "fileChange" ? "文件变化" : "工具调用"}</strong>{item.status === "running" && <small> · 进行中</small>}</p><p>{item.message ?? item.summary ?? item.detail ?? ""}</p>{item.data && item.kind !== "agentMessage" && <details><summary>查看调用详情</summary><pre>{JSON.stringify(item.data, null, 2)}</pre></details>}</>}</div><time>{relativeTime(item.createdAt)}</time></div>)}
+                {(current.activity ?? []).map((item, index) => <div className="activity-entry" key={item.id ?? `${item.createdAt}-${index}`}><span className="activity-rail-icon">{item.kind === "agentMessage" ? "✦" : "↗"}</span><div className="activity-content">{item.kind === "commandExecution" ? <CommandDetails item={item} /> : <><p><strong>{activityLabel(item.kind)}</strong>{item.status === "running" && <small> · 进行中</small>}</p><p>{item.message ?? item.summary ?? item.detail ?? ""}</p>{item.data && !["agentMessage", "userMessage"].includes(item.kind ?? "") && <details><summary>查看调用详情</summary><pre>{JSON.stringify(item.data, null, 2)}</pre></details>}</>}</div><time>{relativeTime(item.createdAt)}</time></div>)}
                 {current.runs?.map((run, index) => <div className="activity-entry" key={run.id ?? `run-${index}`}><span className="activity-rail-icon"><LinearIcon name="terminal" /></span><p><strong>TaskRun</strong> {run.lastOutputSummary ?? run.summary ?? run.phase ?? run.runState ?? run.state ?? "运行记录"}</p><time>{relativeTime(run.updatedAt ?? run.createdAt)}</time></div>)}
                 {current.lastError == null && current.lastMessage == null && (current.activity ?? []).length === 0 && (!current.runs || current.runs.length === 0) && <p className="activity-empty">Codex 开始工作后，最新进展会显示在这里。</p>}
               </div>
               {pendingInteractions.length > 0 && <div className="interaction-list">{pendingInteractions.map((interaction) => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</div>}
             </section>
+            </div>
+            {current.threadId && ["in_progress", "in_review", "done"].includes(current.status) && <form className="task-followup" onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
+              <textarea aria-label="跟进 Codex 会话" placeholder="向 Codex 补充细节或继续处理…" rows={3} value={followup} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendFollowup(); } }} />
+              <div className="task-followup-footer"><span>{sending ? "正在发送…" : "Enter 发送 · Shift+Enter 换行"}</span><button type="submit" aria-label="发送跟进消息" disabled={sending || !followup.trim()}>↑</button></div>
+            </form>}
           </div>
           <aside className="issue-properties">
             <h2>任务属性</h2>
@@ -200,7 +227,7 @@ export function TaskDetail({
               {current.status === "todo" && <button className="detail-open-thread-action" type="button" disabled={!current.ready || saving} onClick={() => void onAction(current, "run")}><LinearIcon name="play" />{current.priority === "draft" ? "草稿暂不执行" : current.ready ? "立即交给 Codex" : "等待前置任务完成"}</button>}
               {current.status === "in_progress" && current.runState === "waiting_quota" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "retry")}><LinearIcon name="play" />手动续跑</button>}
               {current.status === "in_progress" && current.runState === "failed" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "retry")}><LinearIcon name="play" />重试任务</button>}
-              {current.status === "in_progress" && <button className="detail-copy-action" type="button" onClick={() => void onAction(current, "interrupt_requeue")}><LinearIcon name="pause" />暂停并重新排队</button>}
+              {current.status === "in_progress" && <button className="detail-copy-action" type="button" onClick={() => void onAction(current, "interrupt_requeue")}><LinearIcon name="pause" />暂停并退回草稿</button>}
               {current.status === "in_review" && <><button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "complete")}><LinearIcon name="check" />接受并完成</button><textarea className="review-feedback-input" rows={3} value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="审阅未通过时填写反馈…" /><button className="detail-copy-action" type="button" disabled={!feedback.trim()} onClick={() => { void onAction(current, "submit_review_feedback", feedback.trim()); setFeedback(""); }}>退回修改</button></>}
             </div>
             <div className="issue-property-list"><button className="detail-property-row" type="button"><span>编号</span><strong>{current.identifier}</strong></button><div className="detail-property-row"><span>状态</span><strong>{STATUS_LABELS[current.status as TaskStatus] ?? current.status}</strong></div><div className="detail-property-row"><span>优先级</span><strong>{PRIORITY_LABELS[current.priority]}</strong></div><div className="detail-property-row"><span>更新</span><strong>{relativeTime(current.updatedAt)}</strong></div><div className="detail-property-row"><span>运行阶段</span><strong>{current.runState ? RUN_STATE_LABELS[current.runState] : "—"}</strong></div></div>

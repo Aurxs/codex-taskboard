@@ -252,6 +252,7 @@ export async function replaceDependencies(id: string, version: number, blockedBy
 
 export type TaskAction =
   | "run"
+  | "follow_up"
   | "interrupt_requeue"
   | "retry"
   | "submit_review_feedback"

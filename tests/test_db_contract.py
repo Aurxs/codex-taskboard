@@ -106,6 +106,7 @@ class DatabaseContractTests(unittest.TestCase):
         conn.execute("DROP TABLE tasks")
         conn.execute("ALTER TABLE tasks_old RENAME TO tasks")
         conn.execute("DROP TABLE task_attachments")
+        conn.execute("ALTER TABLE tasks DROP COLUMN completed_at")
         conn.execute("UPDATE schema_meta SET version = 4")
         conn.execute("PRAGMA foreign_keys = ON")
         self.db.close()

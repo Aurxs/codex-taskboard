@@ -13,6 +13,7 @@ from codex_taskboard.constants import (
     TaskStatus,
 )
 from codex_taskboard.db import Database
+from codex_taskboard.desktop_server import DesktopAppServer
 from codex_taskboard.errors import AppServerError, ConflictError, ValidationError
 from codex_taskboard.events import EventBus
 from codex_taskboard.scheduler import REVIEW_FEEDBACK_TEMPLATE, Scheduler, _reset_due
@@ -89,6 +90,114 @@ class FakeAppServer:
 
 
 class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_desktop_approval_mirrors_both_sides_without_automatic_response(self):
+        task = self.running_task(self.project())
+        native = DesktopAppServer(notification_handler=self.scheduler._handle_notification)
+        native.transport = Mock(return_value={})
+        self.scheduler.server = native
+        await native.start()
+        native.register_thread_task("thread-1", task["id"])
+        for request_id in (42, 43):
+            native._receive({"type": "mcp-request", "hostId": "local", "request": {
+                "id": request_id, "method": "item/commandExecution/requestApproval",
+                "params": {"threadId": "thread-1", "turnId": "turn-1", "command": "pwd"},
+            }})
+            await asyncio.sleep(0)
+            interaction = self.db.list_interactions(task["id"], pending_only=True)[0]
+            self.assertEqual(self.db.get_task(task["id"])["runState"], "waiting_approval")
+            if request_id == 42:
+                native.transport.assert_not_called()
+                await self.scheduler.resolve_interaction(interaction["id"], interaction["version"], {"decision": "accept"})
+                native.transport.assert_called_once_with(None, {"id": 42, "result": {"decision": "accept"}}, 20)
+            else:
+                native._receive({"type": "mcp-notification", "hostId": "local", "method": "serverRequest/resolved", "params": {"requestId": 43}})
+                await asyncio.sleep(0)
+                self.assertFalse(self.db.list_interactions(task["id"], pending_only=True))
+                self.assertEqual(native.transport.call_count, 1)
+                with self.assertRaises(ConflictError):
+                    await self.scheduler.resolve_interaction(interaction["id"], interaction["version"], {"decision": "accept"})
+
+    async def test_native_reconnect_reconciles_completed_turn_after_local_error(self):
+        task = self.running_task(self.project(review_required=False), state="failed")
+        self.server.read_snapshots["thread-1"] = {"thread": {"turns": [{"id": "turn-1", "status": "completed", "items": []}]}}
+        await self.scheduler._sync_threads()
+        self.assertEqual(self.db.get_task(task["id"])["status"], "done")
+        self.assertEqual(self.server.turn_calls, [])
+
+    async def test_native_followup_and_completed_history_reconcile_without_relaunch(self):
+        task = self.running_task(self.project(review_required=False))
+        self.server.read_snapshots["thread-1"] = {"thread": {"turns": [
+            {"id": "turn-1", "status": "completed", "items": []},
+            {"id": "native-turn", "status": "inProgress", "items": [
+                {"id": "user", "type": "userMessage", "content": [{"type": "text", "text": "请补充细节"}]},
+                {"id": "tool", "type": "commandExecution", "command": "pwd", "status": "inProgress"},
+            ]},
+        ]}}
+        await self.scheduler._sync_threads()
+        self.assertEqual(self.scheduler._task_turns[task["id"]], "native-turn")
+        self.assertEqual(self.db.list_activity(task["id"])[0]["message"], "请补充细节")
+        latest = self.server.read_snapshots["thread-1"]["thread"]["turns"][-1]
+        latest["status"] = "completed"
+        latest["items"][1].update(status="completed", aggregatedOutput="/tmp/project")
+        await self.scheduler._sync_threads()
+        self.assertEqual(self.db.get_task(task["id"])["status"], "done")
+        self.assertEqual(self.db.list_activity(task["id"])[1]["data"]["aggregatedOutput"], "/tmp/project")
+        self.assertEqual(self.server.turn_calls, [])
+        self.assertEqual(self.server.resume_calls, [])
+
+    async def test_pause_is_draft_and_late_completion_does_not_reclaim(self):
+        project = self.project(automation_enabled=True)
+        task = self.running_task(project)
+        self.scheduler._register_turn(task["id"], "turn-1")
+        paused = await self.scheduler.action(task["id"], "interrupt_requeue", task["version"])
+        self.assertEqual((paused["status"], paused["priority"], paused["ready"]), ("todo", "draft", False))
+        await self.scheduler._handle_notification("turn/completed", {
+            "threadId": "thread-1", "turn": {"id": "turn-1", "status": "interrupted"},
+        })
+        await self.scheduler._dispatch_automated()
+        self.assertEqual(self.db.get_task(task["id"])["status"], "todo")
+        self.assertEqual(self.server.turn_calls, [])
+        self.assertEqual(self.db.latest_run(task["id"])["runState"], "interrupted")
+
+    async def test_followup_steers_active_turn_and_starts_same_thread_when_done(self):
+        task = self.running_task(self.project(review_required=False))
+        self.scheduler._register_turn(task["id"], "turn-1")
+        self.server.steer_turn = AsyncMock(return_value={"turnId": "turn-1"})
+        await self.scheduler.action(task["id"], "follow_up", task["version"], "补充")
+        self.server.steer_turn.assert_awaited_once_with("thread-1", "turn-1", "补充")
+        self.assertEqual(self.server.turn_calls, [])
+        await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
+        task = self.db.get_task(task["id"])
+        self.server.start_turn = AsyncMock(return_value="followup-turn")
+        with patch.object(self.scheduler, "_spawn_existing_watch") as watch:
+            continued = await self.scheduler.action(task["id"], "follow_up", task["version"], "再优化")
+            watch.assert_called_once_with(task["id"], "followup-turn")
+        self.assertEqual(continued["status"], "in_progress")
+        self.server.start_turn.assert_awaited_once_with("thread-1", "再优化", task_id=task["id"])
+        await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
+        self.assertEqual(self.db.get_task(task["id"])["status"], "in_progress")
+        self.assertEqual(self.scheduler._task_turns[task["id"]], "followup-turn")
+
+    async def test_failed_followup_does_not_change_completed_task(self):
+        task = self.running_task(self.project(review_required=False))
+        await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
+        task = self.db.get_task(task["id"])
+        self.server.start_turn = AsyncMock(side_effect=AppServerError("disconnected"))
+        with self.assertRaises(AppServerError):
+            await self.scheduler.action(task["id"], "follow_up", task["version"], "保留草稿")
+        self.assertEqual(self.db.get_task(task["id"])["status"], "done")
+
+    async def test_recovery_reads_latest_turn_not_first_completed_turn(self):
+        task = self.running_task(self.project())
+        self.server.read_snapshots["thread-1"] = {"thread": {"id": "thread-1", "turns": [
+            {"id": "turn-1", "status": "completed"},
+            {"id": "turn-2", "status": "inProgress"},
+        ]}}
+        with patch.object(self.scheduler, "_spawn_existing_watch") as watch:
+            await self.scheduler._recover()
+            watch.assert_called_once_with(task["id"], "turn-2")
+        self.assertEqual(self.db.get_task(task["id"])["status"], "in_progress")
+
     async def test_selected_execution_options_reach_initial_and_resumed_turn(self) -> None:
         project = self.project()
         self.server.list_models = AsyncMock(return_value=[{

@@ -574,7 +574,7 @@ class WebSocket:
                     item[1] = None
                     item[0].set()
 
-    def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def request(self, method: str, params: dict[str, Any] | None = None, *, timeout: float = INJECTION_TIMEOUT) -> dict[str, Any]:
         self.connect()
         with self._pending_lock:
             self._request_id += 1
@@ -587,7 +587,7 @@ class WebSocket:
             with self._pending_lock:
                 self._pending.pop(request_id, None)
             raise
-        if not pending[0].wait(INJECTION_TIMEOUT):
+        if not pending[0].wait(timeout):
             with self._pending_lock:
                 self._pending.pop(request_id, None)
             raise InjectorError(f"Timed out waiting for CDP response to {method}")
@@ -698,6 +698,42 @@ class CdpInjector:
         self._injection_registrations: dict[str, str] = {}
         self._runtime_source_hash = ""
         self._source = _read_injection_source(self.injection_path)
+        self._native_decoder = Path(__file__).with_name("native_messages.js").read_text(encoding="utf-8")
+        self.native_event_handler = None
+
+    def native_connected(self) -> bool:
+        with self._connections_lock:
+            return any(not item._closed and getattr(item, "host_context_id", None)
+                       for item in self.connections.values())
+
+    def native_request(self, method: str | None, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+        """Send through the existing desktop bridge; never retry a mutation."""
+        with self._connections_lock:
+            connection = next((item for item in self.connections.values()
+                               if not item._closed and getattr(item, "host_context_id", None)), None)
+        if connection is None:
+            raise InjectorError("Codex 桌面尚未连接，请稍后重试")
+        request_id = f"taskboard-{secrets.token_hex(16)}"
+        if method is None:
+            expression = f"window.electronBridge.sendMessageFromView({json.dumps({'type': 'mcp-response', 'hostId': 'local', 'response': params})})"
+        else:
+            message = {"type": "mcp-request", "hostId": "local", "request": {
+                "id": request_id, "method": method, "params": params}}
+            expression = f"""new Promise((resolve, reject) => {{
+              const id = {json.dumps(request_id)};
+              const finish = (value) => {{ clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); }};
+              const receive = ({self._native_decoder})((data) => {{
+                if (data?.type === 'mcp-response' && data.hostId === 'local' && data.message?.id === id) finish(data.message);
+              }});
+              const timer = setTimeout(() => finish({{error: {{message: 'Codex 响应超时，请检查会话后再重试'}}}}), {int(timeout * 1000)});
+              window.addEventListener('message', receive);
+              try {{ Promise.resolve(window.electronBridge.sendMessageFromView({json.dumps(message)})).catch(error => finish({{error: {{message: String(error)}}}})); }}
+              catch (error) {{ finish({{error: {{message: String(error)}}}}); }}
+            }})"""
+        result = connection.request("Runtime.evaluate", {"expression": expression, "awaitPromise": True, "returnByValue": True}, timeout=timeout + 2)
+        if result.get("exceptionDetails"):
+            raise InjectorError("Codex 桌面消息通道不可用")
+        return (result.get("result") or {}).get("value") or {}
 
     def _emit(self, event: str, **payload: Any) -> None:
         """Write a machine-readable lifecycle line for the native shell.
@@ -998,6 +1034,15 @@ class CdpInjector:
                               "level": detail.get("level", "error")}), file=sys.stderr, flush=True)
             return
         if method == "Runtime.bindingCalled" and params.get("name") == self.HOST_BINDING_NAME:
+            if params.get("executionContextId") == getattr(connection, "host_context_id", None):
+                try:
+                    payload = json.loads(params.get("payload") or "{}")
+                    if payload.get("action") == "native-event":
+                        if self.native_event_handler:
+                            self.native_event_handler(payload.get("message") or {})
+                        return
+                except (ValueError, TypeError):
+                    return
             threading.Thread(target=self._handle_host_binding, args=(connection, params), name="codex-taskboard-host-request", daemon=True).start()
         elif method in {"Page.loadEventFired", "Page.frameNavigated"}:
             # A renderer navigation creates a new execution context.  The
@@ -1022,8 +1067,14 @@ class CdpInjector:
               const capability = {json.dumps(self.host_capability)};
               if (globalThis.__codexTaskboardIsolatedBridgeV1 === capability) return;
               globalThis.__codexTaskboardIsolatedBridgeV1 = capability;
+              const receiveNative = ({self._native_decoder})((message) => {{
+                if (message.hostId === 'local' && ['mcp-notification', 'mcp-request'].includes(message.type)) {{
+                  globalThis[{json.dumps(self.HOST_BINDING_NAME)}](JSON.stringify({{action: 'native-event', message}}));
+                }}
+              }});
               window.addEventListener("message", (event) => {{
                 const message = event.data;
+                receiveNative(event);
                 if (event.source !== window || event.origin !== window.location.origin || !message || typeof message !== "object"
                   || message.type !== {json.dumps(self.HOST_REQUEST_MESSAGE)} || message.capability !== capability) return;
                 globalThis[{json.dumps(self.HOST_BINDING_NAME)}](JSON.stringify(message.payload));

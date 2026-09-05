@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +19,7 @@ from .constants import (
     TaskStatus,
 )
 from .db import Database, utc_now
+from .desktop_server import DesktopAppServer
 from .errors import (
     AppServerError,
     ConflictError,
@@ -186,7 +189,8 @@ class Scheduler:
     ) -> None:
         self.db = db
         self.events = events
-        self.server = CodexAppServer(
+        server_class = DesktopAppServer if os.environ.get("CODEX_TASKBOARD_DESKTOP_TRANSPORT") == "1" and not codex_command else CodexAppServer
+        self.server = server_class(
             codex_command,
             request_handler=self._handle_server_request,
             notification_handler=self._handle_notification,
@@ -202,8 +206,11 @@ class Scheduler:
         self._manual_overrides: set[str] = set()
         self._start_lock = asyncio.Lock()
         self._recovered = False
-        self._activity_hydrated: set[str] = set()
         self._activity_lock = asyncio.Lock()
+        self._followup_lock = asyncio.Lock()
+        self._starting_tasks: set[str] = set()
+        self._history_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._last_sync = 0.0
 
     @property
     def running(self) -> bool:
@@ -213,6 +220,11 @@ class Scheduler:
         if self.running:
             return
         self._stop.clear()
+        if isinstance(self.server, DesktopAppServer):
+            for task in self.db.list_tasks():
+                if task["threadId"]:
+                    self.server.register_thread_task(task["threadId"], task["id"])
+            await self._ensure_server()
         self._loop_task = asyncio.create_task(self._loop(), name="taskboard-scheduler")
 
     async def stop(self) -> None:
@@ -260,6 +272,9 @@ class Scheduler:
         if action == "run":
             return await self.run_task(task_id, expected_version)
 
+        if action == "follow_up":
+            return await self.follow_up(task_id, expected_version, feedback)
+
         if action == "interrupt_requeue":
             self._require_status(task, TaskStatus.IN_PROGRESS)
             self._manual_overrides.add(task_id)
@@ -268,12 +283,16 @@ class Scheduler:
                 await self._interrupt(task)
                 updated = self.db.update_task(
                     task_id,
-                    expected_version,
+                    self.db.get_task(task_id)["version"],
                     status=TaskStatus.TODO.value,
+                    priority="draft",
                     run_state=None,
                     last_error=None,
                 )
                 await self._publish_task(updated)
+                run = self.db.update_latest_run(task_id, run_state="interrupted")
+                if run:
+                    await self._publish_run(run, task["projectId"], task_id)
                 self._cancel_execution(task_id)
                 self.kick()
                 return updated
@@ -370,6 +389,41 @@ class Scheduler:
 
         raise ValidationError(f"Unknown task action {action!r}")
 
+    async def follow_up(self, task_id: str, expected_version: int, text: str | None) -> dict[str, Any]:
+        async with self._followup_lock:
+            task = self.db.get_task(task_id)
+            if task["version"] != expected_version:
+                raise ConflictError("Task changed; refresh before sending")
+            if not text or not text.strip():
+                raise ValidationError("跟进消息不能为空")
+            if not task["threadId"] or task["status"] not in {"in_progress", "in_review", "done"}:
+                raise ValidationError("当前任务没有可跟进的 Codex 会话")
+            await self._ensure_server()
+            snapshot = await self.server.read_thread(task["threadId"], include_turns=True)
+            turns = snapshot.get("thread", {}).get("turns", [])
+            latest = turns[-1] if turns else {}
+            active = latest.get("id") if _turn_status(latest) in {"inprogress", "in_progress", "running", "pending"} else None
+            if not turns:
+                active = self._task_turns.get(task_id)
+            if active:
+                await self.server.steer_turn(task["threadId"], active, text.strip())
+                return self.db.get_task(task_id)
+            if task_id in self._execution_tasks and not self._execution_tasks[task_id].done():
+                raise ConflictError("Codex 正在启动或结束回合，请稍后发送")
+            # Acknowledge only after Codex accepts the text, so transport errors
+            # leave the composer draft available for the user to recover.
+            self._starting_tasks.add(task_id)
+            try:
+                await self.server.resume_thread(task["threadId"])
+                options = await self.execution_options(task.get("model"), task.get("reasoningEffort"))
+                self.server.register_thread_task(task["threadId"], task_id)
+                turn_id = await self.server.start_turn(task["threadId"], text.strip(), task_id=task_id, **options)
+                await self._adopt_turn(task_id, {"id": turn_id, "status": "inProgress"})
+                self._spawn_existing_watch(task_id, turn_id)
+                return self.db.get_task(task_id)
+            finally:
+                self._starting_tasks.discard(task_id)
+
     async def resolve_interaction(
         self,
         interaction_id: str,
@@ -380,6 +434,17 @@ class Scheduler:
     ) -> dict[str, Any]:
         interaction = self.db.get_interaction(interaction_id)
         response = self._validate_interaction_response(interaction, response, canceled=canceled)
+        if isinstance(self.server, DesktopAppServer):
+            if interaction["status"] != "pending" or interaction["version"] != expected_version:
+                raise ConflictError("该请求已在 Codex 或任务面板中处理，请刷新")
+            request_id = interaction["payload"].get("requestId", interaction["requestId"])
+            if request_id not in self.server._requests:
+                raise ConflictError("该请求已结束或连接已重启，请在 Codex 中查看当前请求")
+            await self.server.respond(request_id, result=response)
+            # A native resolution notification may arrive during transport I/O.
+            latest = self.db.get_interaction(interaction_id)
+            if latest["status"] != "pending":
+                return latest
         resolved = self.db.resolve_interaction(
             interaction_id,
             expected_version,
@@ -407,6 +472,9 @@ class Scheduler:
             self._recovered = True
         while not self._stop.is_set():
             self._wake.clear()
+            if time.monotonic() - self._last_sync >= 5:
+                self._last_sync = time.monotonic()
+                await self._sync_threads()
             await self._resume_quota_tasks()
             await self._dispatch_automated()
             timeout = self._next_wait_timeout()
@@ -421,6 +489,8 @@ class Scheduler:
                 raise
 
     async def _dispatch_automated(self) -> None:
+        if isinstance(self.server, DesktopAppServer) and not self.server.available():
+            return
         for project in self.db.list_projects():
             if not project["automationEnabled"]:
                 continue
@@ -436,6 +506,8 @@ class Scheduler:
             self._spawn_execution(task["id"])
 
     async def _resume_quota_tasks(self) -> None:
+        if isinstance(self.server, DesktopAppServer) and not self.server.available():
+            return
         for task in self.db.waiting_quota_tasks():
             project = self.db.get_project(task["projectId"])
             if not project["quotaAutoResumeEnabled"]:
@@ -452,7 +524,9 @@ class Scheduler:
             self._spawn_execution(task["id"], QUOTA_RESUME_PROMPT)
 
     def _next_wait_timeout(self) -> float | None:
-        waits: list[float] = [60.0]
+        if isinstance(self.server, DesktopAppServer) and not self.server.available():
+            return 5.0
+        waits: list[float] = [5.0]
         for task in self.db.waiting_quota_tasks():
             project = self.db.get_project(task["projectId"])
             if not project["quotaAutoResumeEnabled"]:
@@ -465,6 +539,14 @@ class Scheduler:
         return min(waits)
 
     async def _recover(self) -> None:
+        if isinstance(self.server, DesktopAppServer):
+            # The desktop process outlives this sidecar. Its live snapshots
+            # reconcile runs below; never resume, fail or cancel native turns
+            # just because the renderer has not attached yet.
+            for interaction in self.db.pending_interactions():
+                self.db.resolve_interaction(interaction["id"], interaction["version"],
+                                            {"reconnectInCodex": True}, canceled=True)
+            return
         in_progress = self.db.in_progress_tasks()
         needs_server = bool(in_progress) and any(
             task["runState"] not in {RunState.WAITING_QUOTA.value} and task["threadId"]
@@ -494,11 +576,13 @@ class Scheduler:
                     task["id"], {"code": "RECOVERY_READ_FAILED", "message": str(exc)}
                 )
                 continue
-            status = _turn_status(snapshot)
-            turn_id = _identifier(snapshot, "turnId")
+            turns = snapshot.get("thread", {}).get("turns", [])
+            latest = turns[-1] if turns else snapshot
+            status = _turn_status(latest)
+            turn_id = _identifier(latest, "turnId", "id")
             self.server.register_thread_task(task["threadId"], task["id"])
             if status in {"completed", "complete", "succeeded"}:
-                await self._settle_completed(task["id"], snapshot, _short_text(snapshot))
+                await self._settle_completed(task["id"], latest, _short_text(latest))
             elif status in {"in_progress", "inprogress", "running", "pending"} and turn_id:
                 try:
                     # thread/read is observational only.  Resume is required
@@ -540,9 +624,11 @@ class Scheduler:
     def _record_item(self, task_id: str, turn_id: str, item: dict[str, Any],
                      completed: bool, created_at: str | None = None) -> None:
         kind = item.get("type", "")
-        if kind in {"userMessage", "reasoning"} or not item.get("id"):
+        if kind == "reasoning" or not item.get("id"):
             return
         message = item.get("text") or item.get("command") or item.get("tool") or item.get("query") or kind
+        if kind == "userMessage":
+            message = "\n".join(part.get("text", "") for part in item.get("content", []) if isinstance(part, dict) and part.get("type") == "text") or item.get("text") or "用户消息"
         self.db.save_activity(task_id, {
             "id": f"{turn_id}:{item['id']}", "kind": kind,
             "message": str(message) if kind != "agentMessage" or item.get("text") else "正在回复…",
@@ -550,27 +636,82 @@ class Scheduler:
             **({"createdAt": created_at} if created_at else {}),
         })
 
-    async def hydrate_activity(self, task: dict[str, Any]) -> None:
-        """Read retained history once per process without starting or resuming a turn."""
-        if not task["threadId"] or task["id"] in self._activity_hydrated:
+    async def hydrate_activity(self, task: dict[str, Any], *, force: bool = False) -> dict[str, Any] | None:
+        """Refresh retained history, including native follow-ups and completed items."""
+        if not task["threadId"]:
             return
         async with self._activity_lock:
-            if task["id"] in self._activity_hydrated:
-                return
+            cached = self._history_cache.get(task["id"])
+            if not force and cached and time.monotonic() - cached[0] < 1:
+                return cached[1]
             await self._ensure_server()
+            self.server.register_thread_task(task["threadId"], task["id"])
             snapshot = await self.server.read_thread(task["threadId"], include_turns=True)
             thread = snapshot.get("thread", {})
-            existing = {entry["id"] for entry in self.db.list_activity(task["id"])}
             for turn in thread.get("turns", []):
                 created_at = task["createdAt"]
                 if isinstance(turn.get("startedAt"), (int, float)):
                     created_at = datetime.fromtimestamp(turn["startedAt"], timezone.utc).isoformat(timespec="milliseconds")
                 for item in turn.get("items", []):
-                    if f"{turn.get('id', '')}:{item.get('id')}" in existing:
-                        continue
                     self._record_item(task["id"], turn.get("id", ""), item,
-                                      turn.get("status") != "inProgress", created_at)
-            self._activity_hydrated.add(task["id"])
+                                      item.get("status") == "completed" or turn.get("status") != "inProgress", created_at)
+            self._history_cache[task["id"]] = (time.monotonic(), snapshot)
+            return snapshot
+
+    async def _sync_threads(self) -> None:
+        if isinstance(self.server, DesktopAppServer) and not self.server.available():
+            return
+        for task in self.db.list_tasks():
+            if not task["threadId"]:
+                continue
+            self.server.register_thread_task(task["threadId"], task["id"])
+            try:
+                before = self.db.list_activity(task["id"])
+                snapshot = await self.hydrate_activity(task, force=True)
+                current = self.db.get_task(task["id"])
+                if current["version"] != task["version"] or task["id"] in self._starting_tasks:
+                    continue
+                turns = (snapshot or {}).get("thread", {}).get("turns", [])
+                if turns:
+                    latest = turns[-1]
+                    latest_status = _turn_status(latest)
+                    run = self.db.latest_run(task["id"])
+                    if latest.get("id") and (not run or run["turnId"] != latest["id"]):
+                        await self._adopt_turn(task["id"], latest)
+                    elif run and task["status"] == "in_progress" and (
+                        task["runState"] not in {"waiting_quota", "failed"}
+                        or latest_status in {"completed", "inprogress", "in_progress", "running", "pending"}
+                    ):
+                        self._register_turn(task["id"], latest["id"])
+                        if task["runState"] in {"failed", "waiting_quota"} and latest_status in {"inprogress", "in_progress", "running", "pending"}:
+                            updated = await self._set_task(task["id"], run_state="running", last_error=None)
+                            if updated:
+                                await self._publish_task(updated)
+                    if latest_status in {"completed", "failed", "interrupted"}:
+                        if self._task_turns.get(task["id"]) == latest.get("id"):
+                            await self._handle_turn_result(task["id"], {"turn": latest})
+                if before != self.db.list_activity(task["id"]):
+                    await self.events.publish("activity.updated", project_id=task["projectId"], task_id=task["id"])
+            except Exception:
+                # A disconnected desktop is retried; retained tasks are not relaunched.
+                continue
+
+    async def _adopt_turn(self, task_id: str, turn: dict[str, Any]) -> None:
+        if task_id in self._manual_overrides:
+            return
+        task = self.db.get_task(task_id)
+        turn_id = turn.get("id")
+        if not turn_id or self._task_turns.get(task_id) == turn_id:
+            return
+        run = self.db.latest_run(task_id)
+        if any(previous["turnId"] == turn_id for previous in self.db.list_runs(task_id)):
+            return
+        self._register_turn(task_id, turn_id)
+        if not run or run["turnId"] != turn_id:
+            self.db.create_run(task_id=task_id, thread_id=task["threadId"], turn_id=turn_id, run_state="running")
+        updated = await self._set_task(task_id, status="in_progress", run_state="running", last_error=None)
+        if updated:
+            await self._publish_task(updated)
 
     async def list_models(self) -> list[dict[str, Any]]:
         await self._ensure_server()
@@ -612,7 +753,8 @@ class Scheduler:
         execution.add_done_callback(lambda done, task_id=task_id: self._execution_finished(task_id, done))
 
     def _execution_finished(self, task_id: str, task: asyncio.Task[None]) -> None:
-        self._execution_tasks.pop(task_id, None)
+        if self._execution_tasks.get(task_id) is task:
+            self._execution_tasks.pop(task_id, None)
         try:
             task.result()
         except asyncio.CancelledError:
@@ -638,6 +780,7 @@ class Scheduler:
         if task["status"] != TaskStatus.IN_PROGRESS.value:
             return
         project = self.db.get_project(task["projectId"])
+        self._starting_tasks.add(task_id)
         try:
             await self._ensure_server()
             thread_id = task["threadId"]
@@ -661,29 +804,26 @@ class Scheduler:
                 )
             else:
                 prompt = continuation_prompt
-            prompt += self.db.attachment_prompt(task_id)
+            if continuation_prompt is None:
+                prompt += self.db.attachment_prompt(task_id)
             await self._set_task(task_id, run_state=RunState.RUNNING.value)
             options = await self.execution_options(task.get("model"), task.get("reasoningEffort"))
             turn_id = await self.server.start_turn(thread_id, prompt, task_id=task_id, **options)
             self._register_turn(task_id, turn_id)
-            try:
-                await self.server.set_thread_name(thread_id, f"[Taskboard]{task['title']}")
-            except Exception as exc:
-                self.db.save_activity(task_id, {"id": f"{turn_id}:title-warning", "kind": "warning",
-                                                "message": f"会话标题同步失败：{exc}"})
-            try:
-                snapshot = await self.server.read_thread(thread_id, include_turns=False)
-                await self.events.publish("thread.available", project_id=task["projectId"], task_id=task_id,
-                                          payload=snapshot)
-            except Exception:
-                pass
-            run = self.db.create_run(
-                task_id=task_id,
-                thread_id=thread_id,
-                turn_id=turn_id,
-                run_state=RunState.RUNNING.value,
-            )
+            self._starting_tasks.discard(task_id)
+            run = self.db.latest_run(task_id)
+            if not run or run["turnId"] != turn_id:
+                run = self.db.create_run(
+                    task_id=task_id, thread_id=thread_id, turn_id=turn_id,
+                    run_state=RunState.RUNNING.value,
+                )
             await self._publish_run(run, task["projectId"], task_id)
+            if not resuming:
+                try:
+                    await self.server.set_thread_name(thread_id, f"[Taskboard]{task['title']}")
+                except Exception as exc:
+                    self.db.save_activity(task_id, {"id": f"{turn_id}:title-warning", "kind": "warning",
+                                                    "message": f"会话标题同步失败：{exc}"})
             completed = await self.server.wait_for_turn(turn_id)
             await self._handle_turn_result(task_id, completed)
         except asyncio.CancelledError:
@@ -692,6 +832,8 @@ class Scheduler:
             await self._quota_wait(task_id, exc, None)
         except Exception as exc:
             await self._fail_task(task_id, {"code": getattr(exc, "code", "TURN_FAILED"), "message": str(exc)})
+        finally:
+            self._starting_tasks.discard(task_id)
 
     async def _watch_turn(self, task_id: str, turn_id: str) -> None:
         try:
@@ -700,7 +842,8 @@ class Scheduler:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            await self._fail_task(task_id, {"code": "RECOVERED_TURN_FAILED", "message": str(exc)})
+            if self._task_turns.get(task_id) == turn_id:
+                await self._fail_task(task_id, {"code": "RECOVERED_TURN_FAILED", "message": str(exc)})
 
     def _register_turn(self, task_id: str, turn_id: str) -> None:
         self._task_turns[task_id] = turn_id
@@ -714,6 +857,12 @@ class Scheduler:
         if task["status"] != TaskStatus.IN_PROGRESS.value:
             return
         turn_id = _identifier(result, "turnId", "id")
+        current_turn = self._task_turns.get(task_id)
+        if current_turn and turn_id and current_turn != turn_id:
+            return
+        run = self.db.latest_run(task_id)
+        if not current_turn and run and run["turnId"] == turn_id and run["runState"] in {"completed", "failed", "waiting_quota", "interrupted"}:
+            return
         prior_error = self._turn_errors.pop(turn_id, None) if turn_id else None
         status = _turn_status(result)
         error = _structured_error(result) or _structured_error(prior_error)
@@ -745,8 +894,8 @@ class Scheduler:
                 error
                 or {"code": "TURN_FAILED", "message": "Codex turn failed without a structured error."},
             )
-        self._task_turns.pop(task_id, None)
-        turn_id = next((key for key, value in self._turn_tasks.items() if value == task_id), None)
+        if self._task_turns.get(task_id) == turn_id:
+            self._task_turns.pop(task_id, None)
         if turn_id:
             self._turn_tasks.pop(turn_id, None)
 
@@ -868,7 +1017,16 @@ class Scheduler:
         self.kick()
 
     async def _interrupt(self, task: dict[str, Any]) -> None:
+        if task["id"] in self._starting_tasks:
+            raise ConflictError("Codex 正在启动回合，请稍后暂停")
         turn_id = self._task_turns.get(task["id"])
+        if not turn_id and task["threadId"]:
+            await self._ensure_server()
+            snapshot = await self.server.read_thread(task["threadId"], include_turns=True)
+            turns = snapshot.get("thread", {}).get("turns", [])
+            latest = turns[-1] if turns else {}
+            if _turn_status(latest) in {"inprogress", "in_progress", "running", "pending"}:
+                turn_id = latest.get("id")
         if not turn_id or not task["threadId"]:
             return
         try:
@@ -932,6 +1090,30 @@ class Scheduler:
             )
             self.kick()
         elif task_id:
+            if method == "desktop/request":
+                request_id = str(params["requestId"])
+                if not any(item["requestId"] == request_id for item in self.db.list_interactions(task_id)):
+                    kind = APPROVAL_METHODS.get(params["requestMethod"], "user_input")
+                    interaction = self.db.create_interaction(task_id=task_id, kind=kind,
+                                                             request_id=request_id, payload=params)
+                    updated = await self._set_task(task_id, run_state="waiting_input" if kind == "user_input" else "waiting_approval")
+                    if updated:
+                        await self._publish_task(updated)
+                    await self._publish_interaction(interaction)
+            elif method == "turn/started":
+                await self._adopt_turn(task_id, params.get("turn", {}))
+            elif method == "turn/completed":
+                await self._handle_turn_result(task_id, params)
+            elif method == "serverRequest/resolved":
+                for interaction in self.db.list_interactions(task_id, pending_only=True):
+                    if str(interaction["requestId"]) == str(params.get("requestId")):
+                        resolved = self.db.resolve_interaction(interaction["id"], interaction["version"], {"resolvedInCodex": True})
+                        await self._publish_interaction(resolved)
+                task = self.db.get_task(task_id)
+                if task_id not in self._manual_overrides and task["status"] == "in_progress" and task["runState"] in {"waiting_input", "waiting_approval"} and not self.db.list_interactions(task_id, pending_only=True):
+                    updated = await self._set_task(task_id, run_state="running")
+                    if updated:
+                        await self._publish_task(updated)
             if method in {"item/started", "item/completed"}:
                 self._record_item(task_id, turn_id or "", params.get("item", {}), method == "item/completed")
             await self.events.publish(
@@ -947,6 +1129,10 @@ class Scheduler:
             task_id = self.server.task_for_thread(thread_id)
             if task_id:
                 return task_id
+            task = next((task for task in self.db.list_tasks() if task["threadId"] == thread_id), None)
+            if task:
+                self.server.register_thread_task(thread_id, task["id"])
+                return task["id"]
         turn_id = _identifier(params, "turnId")
         if turn_id:
             return self.server.task_for_turn(turn_id) or self._turn_tasks.get(turn_id)

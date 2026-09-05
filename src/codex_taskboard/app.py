@@ -410,6 +410,7 @@ def create_app(
             await scheduler.hydrate_activity(task)
         except Exception:
             task["activityError"] = "暂时无法读取 Codex 历史，以下为本地保存的记录。"
+        task = {**db.get_task(task_id), **({"activityError": task["activityError"]} if task.get("activityError") else {})}
         task["activity"] = db.list_activity(task_id)
         task["runs"] = db.list_runs(task_id)
         task["interactions"] = db.list_interactions(task_id)
