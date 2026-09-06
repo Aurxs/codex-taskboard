@@ -12145,3 +12145,67 @@ button.attachment-link { width: 100%; border: 0; background: transparent; text-a
 
 .execution-setting-field input { min-width: 0; width: 100%; padding: 6px 8px; border: 1px solid var(--border-color, #ddd); border-radius: 6px; color: inherit; background: transparent; font: inherit; }
 .task-worktree-path { display: block; overflow-wrap: anywhere; opacity: .7; }
+
+/* Compact creation toolbar and the shared, bounded More settings surface. */
+.task-dialog .composer-properties { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.task-dialog .composer-properties > .task-property-picker { min-width: 0; }
+.task-dialog .composer-properties .property-control { white-space: nowrap; width: auto; }
+.compact-settings { display: inline-flex; flex: 0 0 auto; gap: 0; }
+.app-shell .issue-properties .compact-settings { display: inline-flex; margin: 10px 0; }
+.more-settings-trigger { display: inline-flex; align-items: center; gap: 5px; }
+.more-settings-trigger svg { width: 12px; height: 12px; }
+.settings-error-dot { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: var(--surface); background: var(--text-danger, #d34747); font-size: 10px; }
+.more-settings-panel { display: flex; flex-direction: column; min-width: 0; font-size: 12px; }
+.settings-search { flex: none; min-width: 0; width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--border); padding: 12px; background: transparent; color: var(--text-primary); outline-offset: -3px; }
+.settings-row { display: flex; gap: 12px; align-items: center; border: 0; width: 100%; min-height: 38px; padding: 8px 12px; background: transparent; color: var(--text-primary); text-align: left; font: inherit; cursor: pointer; }
+.settings-row:hover:not(:disabled), .settings-choices button:hover:not(:disabled) { background: var(--surface-hover); }
+.settings-row:disabled { cursor: default; opacity: .6; }
+.settings-row-label { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.settings-row-label i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-secondary); }
+.settings-row-value { min-width: 0; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.settings-row svg { transform: rotate(180deg); width: 12px; height: 12px; flex: none; color: var(--text-tertiary); }
+.settings-reset { padding: 9px 12px; text-align: left; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; }
+.settings-page-heading { display: flex; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid var(--border); }
+.settings-page-heading button { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 5px; background: transparent; color: var(--text-primary); cursor: pointer; }
+.settings-page-heading svg { width: 14px; height: 14px; }
+.settings-choices button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px 12px; border: 0; background: transparent; color: var(--text-primary); text-align: left; font: inherit; cursor: pointer; }
+.settings-choices svg { width: 14px; height: 14px; }
+.settings-value-editor { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.settings-value-editor input, .settings-value-editor textarea, .worktree-recovery input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 8px; color: var(--text-primary); background: var(--surface); font: inherit; }
+.settings-value-editor textarea { resize: vertical; max-height: 150px; }
+.settings-value-editor small, .settings-note { color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+.settings-note { display: block; padding: 7px 12px; }
+.settings-value-editor .button { align-self: flex-end; min-height: 28px; }
+.more-settings-panel .form-error { padding: 8px 12px; margin: 0; }
+.task-parallel-badge { display: inline-block; color: var(--text-tertiary); font-size: 10px; margin-top: 4px; }
+.task-wait-reason, .task-merge-state { margin: 12px 0; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.group-tasks { margin: 18px 0; border: 1px solid var(--border); border-radius: 9px; padding: 14px; }
+.group-tasks-heading { display: flex; align-items: center; gap: 12px; }
+.group-tasks-heading h2 { margin: 0; font-size: 14px; }
+.group-tasks-heading span { font-size: 12px; color: var(--text-tertiary); }
+.group-tasks-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.group-tasks-toolbar small { color: var(--text-tertiary); }
+.group-child-list { list-style: none; margin: 0; padding: 0; }
+.group-child-list li { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--border); padding: 10px 0; }
+.group-child-open { flex: 1; min-width: 0; border: 0; background: transparent; text-align: left; color: var(--text-primary); cursor: pointer; }
+.group-child-open strong, .group-child-open span { display: block; overflow-wrap: anywhere; }
+.group-child-open strong { font-size: 13px; font-weight: 500; }
+.group-child-open span { margin-top: 4px; color: var(--text-tertiary); font-size: 11px; }
+.group-child-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.group-child-actions button, .group-plan-status button { border: 0; background: transparent; color: var(--text-secondary); font-size: 11px; cursor: pointer; }
+.group-plan-status { display: flex; flex-wrap: wrap; gap: 8px; color: var(--text-secondary); font-size: 12px; }
+.plan-proposal { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
+.plan-proposal h3 { margin: 0; font-size: 13px; }
+.plan-proposal p { font-size: 12px; color: var(--text-secondary); }
+.proposal-task { margin: 12px 0; }
+.proposal-task > input, .proposal-task textarea { box-sizing: border-box; display: block; width: 100%; border: 1px solid var(--border); border-radius: 5px; padding: 7px; margin: 6px 0; background: var(--surface); color: var(--text-primary); font: inherit; font-size: 12px; }
+.proposal-task details { font-size: 12px; color: var(--text-secondary); }
+.proposal-dependency { display: flex; align-items: center; gap: 5px; margin: 5px 0; }
+.worktree-recovery { display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 540px) { .group-child-list li { align-items: flex-start; flex-direction: column; } .group-child-actions { justify-content: flex-start; } }
+
+.merge-history { margin-top: 12px; font-size: 12px; color: var(--text-secondary); }
+.merge-history summary { cursor: pointer; padding: 8px 0; }
+.merge-history p { margin: 6px 0; overflow-wrap: anywhere; }
+.merge-history code { font-size: 11px; user-select: text; }
+.merge-history-entry { border-top: 1px solid var(--border); padding: 10px 0; }

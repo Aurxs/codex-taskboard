@@ -1,4 +1,4 @@
-import { t } from "../i18n";
+import { t, localizeError } from "../i18n";
 import completeIcon from "../assets/figma-taskboard/card-complete.svg";
 import processingAnimation from "../assets/figma-taskboard/loading-16.svg";
 import type { Task } from "../types";
@@ -70,7 +70,7 @@ export function TaskCard({
       <div className="card-topline">
         <span className="card-reference"><span className="task-identifier">ID: {task.identifier}</span></span>
         {pendingInteraction && <span className="task-unread-dot" aria-label={t("有待处理交互")} />}
-        {task.status === "in_review" && <button className="task-card-complete" type="button" onClick={(event) => { event.stopPropagation(); onComplete(task); }}><img src={completeIcon} alt="" /><span>{t("完成")}</span></button>}
+        {task.status === "in_review" && <button className="task-card-complete" type="button" onClick={(event) => { event.stopPropagation(); onComplete(task); }}><img src={completeIcon} alt="" /><span>{task.parallel?.managed ? t("确认并合入") : t("完成")}</span></button>}
       </div>
       <h3 id={`task-${task.id}-title`}>{task.title}</h3>
       {excerpt && <p className="task-card-description">{excerpt}</p>}
@@ -83,6 +83,9 @@ export function TaskCard({
         {task.threadId && <span className="task-thread-chip" title={t("已关联 Codex thread")}>⌁</span>}
       </div>
       {task.blockedBy.length > 0 && <div className="task-card-dependencies"><span className="task-card-dependency-lock" aria-hidden="true">⌑</span><span>{t("阻塞于")} {task.blockedBy.map((item) => item.identifier).join(", ")}</span></div>}
+      {task.kind === "parallel_group" && <div className="task-card-execution">{t("并行任务组")} · {t("已集成 {0} / {1}", task.progress?.integrated ?? 0, task.progress?.total ?? 0)}{Boolean(task.progress?.running) && <> · {t("运行中 {0}", task.progress?.running ?? 0)}</>}{Boolean(task.progress?.attention) && <> · {t("需处理 {0}", task.progress?.attention ?? 0)}</>}</div>}
+      {task.schedulingMode === "parallel" && <span className="task-parallel-badge">{t("允许并行")}</span>}
+      {task.waitReason && <div className="task-card-execution">{localizeError(task.waitReason)}</div>}
       {processing && (
         <div className={`task-processing-row${task.runState === "running" ? " is-running" : " is-paused"}`}>
           {task.runState === "running" && <img className="task-processing-glyph" src={processingAnimation} alt="" aria-hidden="true" />}

@@ -25,7 +25,7 @@ This is an independent community project with no affiliation with or endorsement
 | --- | --- |
 | Four-column board | Todo → In progress → In review → Done; canceled tasks are available separately |
 | Task dependencies | Set prerequisite tasks; a task enters the execution flow after its blockers are cleared |
-| Project scheduling | At most one task runs per project; different projects can run in parallel |
+| Parallel scheduling | Opt ordinary tasks into parallel execution or configure dependent subtasks in a group; no concurrency cap |
 | Automation toggles | Auto-claim is off by default, and human review is on by default |
 | Usage-limit continuation | Automatic continuation after usage limits is enabled by default; you can disable it per project and manually resume the original thread |
 | Execution options | Reuse the Codex session by default, or choose a model and reasoning effort for each task |
@@ -33,7 +33,7 @@ This is an independent community project with no affiliation with or endorsement
 
 ### Create a task with clear context
 
-Enter a title, Markdown description, priority, and acceptance criteria. Choose a model and reasoning effort when needed; the choices take effect on the next execution.
+Enter a title, Markdown description, priority, and acceptance criteria. Use “More” to search and edit model, reasoning effort, worktree, branch, and scope settings without enlarging the composer. The same popover keeps its draft when closed; use “Save settings” in task details to submit changes.
 
 Attach PNG, JPEG, GIF, WebP images, Markdown, plain text, PDF, or Office documents (up to 10 files, 10 MB each, 20 MB total). Files are saved with the task and provided to Codex through local paths during execution. Preview images and text in the details; open PDF and Office documents in their default external applications.
 
@@ -51,13 +51,29 @@ Select prerequisite tasks under “Blocked by” to split work that must happen 
 
 Review task properties, execution stage, dependencies, and run history in one place. You can also hand a task to Codex manually or cancel it.
 
-Running, review, and completed tasks have a pinned follow-up composer in the left detail panel. Messages steer an active turn or continue the same thread after completion. Enter sends; Shift+Enter adds a line; failed sends retain the draft. Long descriptions and history scroll independently. “Open in Codex” opens the native conversation; native follow-up messages, replies, and turn status sync back to the board.
+Ordinary tasks and subtasks that are running, in review, or completed have a pinned follow-up composer in the left detail panel. Messages steer an active turn or continue the same thread after completion. Enter sends; Shift+Enter adds a line; failed sends retain the draft. Long descriptions and history scroll independently. “Open in Codex” opens the native conversation; native follow-up messages, replies, and turn status sync back to the board.
 
-Normal development and packaged launches share the desktop's existing App Server without synthetic native notifications or changes to its composer. Live events are backed by a latest-turn check every five seconds. Pause interrupts the turn and returns the task to draft priority, preventing automatic re-claim. Restart the launcher after upgrading to load these changes. Backend-only / no-injector diagnostic modes retain an isolated stdio server and do not provide native bidirectional sync.
+Normal development and packaged launches share the desktop's existing App Server without synthetic native notifications or changes to its composer. Live events are backed by a latest-turn check every five seconds. Legacy task pause returns to draft; managed parallel tasks preserve their delivery state and require confirmed interruption before releasing reservations. Restart the launcher after upgrading to load these changes. Backend-only / no-injector diagnostic modes retain an isolated stdio server and do not provide native bidirectional sync.
 
 ![Task details](docs/images/task-detail-en.png)
 
-Task execution settings offer the current project directory or a new worktree. New worktrees use the Codex desktop's native creation, ownership, and cleanup services and require a desktop connection. Enter an existing local or remote starting branch (for example, `main` or `origin/main`), or leave it empty to copy the current working tree state. Codex manages the independent checkout from that starting point. Once execution starts, location and branch are locked; retries and follow-ups reuse the saved worktree and conversation. Task details show the actual worktree path. If creation times out or the connection drops, check Codex for a created worktree before retrying.
+Ordinary exclusive tasks offer the current project directory or a new worktree. New worktrees use the Codex desktop's native creation, ownership, and cleanup services and require a desktop connection. Enter an existing local or remote starting branch (for example, `main` or `origin/main`), or leave it empty to copy the current working tree state. Codex manages the independent checkout from that starting point. Once execution starts, location and branch are locked; retries and follow-ups reuse the saved worktree and conversation. Task details show the actual worktree path. If creation times out or the connection drops, check Codex for a created worktree before retrying.
+
+### Parallel execution and groups
+
+Ordinary tasks default to exclusive execution. Choose “Allow parallel” before the first start to use an isolated native Codex worktree and conversation. All eligible tasks can run; there is no execution-count limit or setting. Projects backed by the same Git common directory share exclusivity and scope reservations. A ready exclusive task stops later parallel tasks from overtaking it while existing executions drain; unmet dependencies do not create a barrier.
+
+Create a parallel group, then add subtasks in its details. Declare dependencies and optional write scopes, or generate an AI decomposition draft and edit it before confirming. Draft generation never changes the execution graph or starts implementation. Submit a group with at least one valid subtask; with auto-claim disabled, run the submitted group manually. One nesting level is supported. Subtasks depend on members of their own group; top-level cards express dependencies between groups. The parent has no implementation Agent.
+
+Subtasks inherit the parent model and reasoning effort unless overridden. They start from the integration revision containing their completed dependencies. Failure blocks only dependent work. Each subtask integrates automatically; the complete group is reviewed and delivered once. “Confirm and merge” publishes the reviewed commit, or publication is automatic when human review is disabled. Only verified Git integration marks a managed delivery done.
+
+Parallel executions start from committed revisions, defaulting to the local target branch selected at creation; “More” can select another existing starting branch. Uncommitted main-workspace changes are not copied. Saved baselines, worktrees, and target branches are fixed after first start. Merges run in isolated worktrees and serialize per repository. Git handles clean merges; only conflicts create a dedicated Codex repair session. Source, target, and result commits are recorded. A moving target causes preparation to restart; a dirty target requires attention and retry, without automatic stash, reset, or overwrite.
+
+Write scopes are optional repository-relative files or directories, one per line, without globs. Reservations last until integration; groups reserve the union externally and check child overlap internally. These are coordination rules, not Shell write interception. Unscoped tasks may still conflict. Out-of-scope changes require pausing and explicitly expanding the scope before integration; changes are retained.
+
+Pause stops dispatch before interrupting and confirming active implementation and auxiliary turns. Uncertain stops retain reservations. Paused groups can add work, remove unstarted tasks, or adjust unstarted dependencies. Reworking a dependency marks consumers for revalidation. Cancel preserves history and already integrated changes. Reconnection reconciles native turns, worktrees, and recorded operations without blindly replaying creation or execution. Details can link an existing worktree or conversation after uncertain creation. Conflicting turns launched directly in Codex are reported after synchronization; external activity cannot be intercepted in advance.
+
+Existing tasks migrate as ordinary exclusive tasks, retaining their worktree, conversation, dependencies, and history. They are not retroactively auto-merged.
 
 ## Language
 

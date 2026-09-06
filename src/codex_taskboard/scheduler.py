@@ -29,6 +29,7 @@ from .errors import (
     ValidationError,
 )
 from .events import EventBus
+from .parallel_runtime import ParallelRuntime
 
 
 def _values(value: Any):
@@ -211,6 +212,7 @@ class Scheduler:
         self._starting_tasks: set[str] = set()
         self._history_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._last_sync = 0.0
+        self.parallel = ParallelRuntime(self)
 
     @property
     def running(self) -> bool:
@@ -240,6 +242,7 @@ class Scheduler:
         for task in tuple(self._execution_tasks.values()):
             task.cancel()
         self._execution_tasks.clear()
+        await self.parallel.stop()
         for waiter in tuple(self._interaction_waiters.values()):
             if not waiter.done():
                 waiter.cancel()
@@ -251,10 +254,14 @@ class Scheduler:
         self._wake.set()
 
     async def run_task(self, task_id: str, expected_version: int) -> dict[str, Any]:
-        task = self.db.claim_task(task_id, expected_version)
-        await self._publish_task(task)
-        self._spawn_execution(task_id)
-        return task
+        task = self.db.get_task(task_id)
+        if task["version"] != expected_version:
+            raise ConflictError("Task changed; refresh before running it")
+        if task["status"] != "todo":
+            raise ValidationError("Only todo tasks can be run")
+        if not self.db.dependencies_ready(task_id):
+            raise ValidationError("Task dependencies are not complete")
+        return await self.parallel.queue(task)
 
     async def action(
         self,
@@ -269,6 +276,13 @@ class Scheduler:
         if int(task["version"]) != expected_version:
             raise ConflictError("Task changed; refresh before applying the action")
 
+        handled = await self.parallel.action(task, action, feedback)
+        if handled is not None:
+            return handled
+        if task["kind"] == "parallel_group":
+            raise ValidationError("请在任务组中选择具体子任务操作")
+        if action == "interrupt_requeue" and task["parallel"].get("managed"):
+            return await self.parallel.pause(task)
         if action == "run":
             return await self.run_task(task_id, expected_version)
 
@@ -352,40 +366,14 @@ class Scheduler:
                 raise ValidationError("Review feedback is required")
             if not task["threadId"]:
                 raise ValidationError("This review has no Codex thread to resume")
-            updated = self.db.update_task(
-                task_id,
-                expected_version,
-                status=TaskStatus.IN_PROGRESS.value,
-                run_state=RunState.STARTING.value,
-                last_error=None,
-                last_message=feedback.strip(),
-            )
-            await self._publish_task(updated)
-            self._spawn_execution(task_id, REVIEW_FEEDBACK_TEMPLATE.format(feedback=feedback.strip()))
-            return updated
+            return await self.parallel.queue(task, REVIEW_FEEDBACK_TEMPLATE.format(feedback=feedback.strip()))
 
         if action == "retry":
-            if task["status"] != TaskStatus.IN_PROGRESS.value or task["runState"] not in {
-                RunState.FAILED.value,
-                RunState.WAITING_QUOTA.value,
-            }:
+            if task["status"] != TaskStatus.IN_PROGRESS.value or task["runState"] not in {RunState.FAILED.value, RunState.WAITING_QUOTA.value}:
                 raise ValidationError("Only failed or quota-paused tasks can be retried")
-            if not task["threadId"]:
+            if not task["threadId"] and not task["parallel"].get("managed"):
                 raise ValidationError("Retry requires the original Codex thread")
-            updated = self.db.update_task(
-                task_id,
-                expected_version,
-                run_state=RunState.STARTING.value,
-                last_error=None,
-            )
-            await self._publish_task(updated)
-            self._spawn_execution(
-                task_id,
-                QUOTA_RESUME_PROMPT
-                if task["runState"] == RunState.WAITING_QUOTA.value
-                else FAILED_RETRY_PROMPT,
-            )
-            return updated
+            return await self.parallel.queue(task, QUOTA_RESUME_PROMPT if task["runState"] == "waiting_quota" else FAILED_RETRY_PROMPT)
 
         raise ValidationError(f"Unknown task action {action!r}")
 
@@ -410,17 +398,35 @@ class Scheduler:
                 return self.db.get_task(task_id)
             if task_id in self._execution_tasks and not self._execution_tasks[task_id].done():
                 raise ConflictError("Codex 正在启动或结束回合，请稍后发送")
-            # Acknowledge only after Codex accepts the text, so transport errors
-            # leave the composer draft available for the user to recover.
+            self.db.enqueue(task_id, expected_version, text.strip())
+            claimed = self.db.claim_candidate(task_id, queued=True)
+            if claimed is None:
+                return await self.parallel.publish(task_id)
+            if claimed["parallel"].get("validationRequested"):
+                self._spawn_execution(task_id, text.strip())
+                return await self.parallel.publish(task_id)
             self._starting_tasks.add(task_id)
             try:
                 await self.server.resume_thread(task["threadId"])
-                options = await self.execution_options(task.get("model"), task.get("reasoningEffort"))
+                parent = self.db.get_task(task["parentId"]) if task["parentId"] else None
+                model = task.get("model") or (parent["model"] if parent else None)
+                effort = task.get("reasoningEffort") or (parent["reasoningEffort"] if parent and not task["model"] else None)
+                options = await self.execution_options(model, effort)
+                if self.db.get_task(task_id)["parallel"].get("paused") or (parent and self.db.get_task(parent["id"])["groupPhase"] != "submitted"):
+                    raise ConflictError("任务已暂停，请继续后再发送跟进")
                 self.server.register_thread_task(task["threadId"], task_id)
-                turn_id = await self.server.start_turn(task["threadId"], text.strip(), task_id=task_id, **options)
+                turn_id = await self.parallel.execution_turn(task, task["threadId"], text.strip(), options)
+                if task["parallel"].get("managed"):
+                    self.db.mark_downstream_stale(task_id)
                 await self._adopt_turn(task_id, {"id": turn_id, "status": "inProgress"})
                 self._spawn_existing_watch(task_id, turn_id)
                 return self.db.get_task(task_id)
+            except Exception:
+                self.db.finish_queue(task_id)
+                self.db.release_execution(task_id)
+                current = self.db.get_task(task_id)
+                self.db.update_task(task_id, current["version"], status="canceled" if current["status"] == "canceled" else task["status"], run_state=task["runState"], parallel={**task["parallel"], **{k: v for k, v in current["parallel"].items() if k in {"uncertainExecution", "nativeConflict", "waitReason", "paused"}}})
+                raise
             finally:
                 self._starting_tasks.discard(task_id)
 
@@ -475,6 +481,7 @@ class Scheduler:
             if time.monotonic() - self._last_sync >= 5:
                 self._last_sync = time.monotonic()
                 await self._sync_threads()
+                await self.parallel.recover()
             await self._resume_quota_tasks()
             await self._dispatch_automated()
             timeout = self._next_wait_timeout()
@@ -491,19 +498,7 @@ class Scheduler:
     async def _dispatch_automated(self) -> None:
         if isinstance(self.server, DesktopAppServer) and not self.server.available():
             return
-        for project in self.db.list_projects():
-            if not project["automationEnabled"]:
-                continue
-            if self.db.project_has_active_task(project["id"]):
-                continue
-            try:
-                task = self.db.claim_next_ready(project["id"])
-            except TaskboardError:
-                continue
-            if task is None:
-                continue
-            await self._publish_task(task)
-            self._spawn_execution(task["id"])
+        await self.parallel.dispatch()
 
     async def _resume_quota_tasks(self) -> None:
         if isinstance(self.server, DesktopAppServer) and not self.server.available():
@@ -518,10 +513,14 @@ class Scheduler:
                 continue
             if task["id"] in self._execution_tasks:
                 continue
-            updated = await self._set_task(task["id"], run_state=RunState.STARTING.value)
-            if updated is not None:
-                await self._publish_task(updated)
-            self._spawn_execution(task["id"], QUOTA_RESUME_PROMPT)
+            if task["queued"] or task["parallel"].get("paused"):
+                continue
+            if task["parallel"].get("quotaRetryAt", 0) > time.time():
+                continue
+            try:
+                await self.parallel.queue(task, QUOTA_RESUME_PROMPT)
+            except Exception as exc:
+                self.db.set_parallel(task["id"], quotaRetryAt=time.time() + 5, waitReason=str(exc))
 
     def _next_wait_timeout(self) -> float | None:
         if isinstance(self.server, DesktopAppServer) and not self.server.available():
@@ -536,7 +535,7 @@ class Scheduler:
                 seconds = _seconds_until(run["resumeAt"])
                 if seconds is not None:
                     waits.append(seconds)
-        return min(waits)
+        return max(0.1, min(waits))
 
     async def _recover(self) -> None:
         if isinstance(self.server, DesktopAppServer):
@@ -680,6 +679,7 @@ class Scheduler:
                         await self._adopt_turn(task["id"], latest)
                     elif run and task["status"] == "in_progress" and (
                         task["runState"] not in {"waiting_quota", "failed"}
+                        or task["parallel"].get("uncertainObservation")
                         or latest_status in {"completed", "inprogress", "in_progress", "running", "pending"}
                     ):
                         self._register_turn(task["id"], latest["id"])
@@ -706,6 +706,19 @@ class Scheduler:
         run = self.db.latest_run(task_id)
         if any(previous["turnId"] == turn_id for previous in self.db.list_runs(task_id)):
             return
+        if turn.get("status") in {"inProgress", "in_progress", "running", "pending"}:
+            with self.db.transaction(immediate=True):
+                has_lease = self.db._conn.execute("SELECT 1 FROM execution_leases WHERE task_id=?", (task_id,)).fetchone()
+                if not has_lease:
+                    reason = self.db.eligibility(task, fairness=False)
+                    root = self.db.get_task(task["parentId"]) if task["parentId"] else task
+                    self.db._conn.execute("INSERT OR REPLACE INTO execution_leases VALUES(?,?,?,?)",
+                                          (task_id, self.db.repo_info(task)[1], root["id"], root["schedulingMode"]))
+                    if reason:
+                        self.db.set_parallel(task_id, nativeConflict=True, waitReason=reason)
+                if task["parallel"].get("managed") and task["parallel"].get("resultCommit"):
+                    self.db.mark_downstream_stale(task_id)
+                    self.db.set_parallel(task_id, mergeState="none", approvedCommit=None)
         self._register_turn(task_id, turn_id)
         if not run or run["turnId"] != turn_id:
             self.db.create_run(task_id=task_id, thread_id=task["threadId"], turn_id=turn_id, run_state="running")
@@ -783,6 +796,9 @@ class Scheduler:
         self._starting_tasks.add(task_id)
         try:
             await self._ensure_server()
+            task = await self.parallel.prepare_task(task_id)
+            if task["parallel"].get("paused") or (task["parentId"] and self.db.get_task(task["parentId"])["groupPhase"] != "submitted"):
+                return
             thread_id = task["threadId"]
             resuming = bool(thread_id)
             if not thread_id:
@@ -792,7 +808,7 @@ class Scheduler:
                                                 worktree_git_root=worktree["worktreeGitRoot"]) or self.db.get_task(task_id)
                 if task["status"] != TaskStatus.IN_PROGRESS.value:
                     return
-                thread_id = await self.server.start_thread(task.get("worktreePath") or project["workspacePath"])
+                thread_id = await self.parallel.execution_thread(task, task.get("worktreePath") or project["workspacePath"])
                 self.server.register_thread_task(thread_id, task_id)
                 task = await self._set_task(task_id, thread_id=thread_id) or self.db.get_task(task_id)
             else:
@@ -812,11 +828,25 @@ class Scheduler:
                 )
             else:
                 prompt = continuation_prompt
+            if task["parentId"]:
+                parent = self.db.get_task(task["parentId"])
+                prompt = (f"Parent task: {parent['title']}\nOverall requirements:\n{parent['description']}\n\n" + prompt)
+                prompt += self.db.attachment_prompt(parent["id"])
+                task = {**task, "model": task["model"] or parent["model"],
+                        "reasoningEffort": task["reasoningEffort"] or (parent["reasoningEffort"] if not task["model"] else None)}
+            if task["writeScopes"]:
+                prompt += "\nDeclared modification scope (request clarification before expanding):\n" + "\n".join(task["writeScopes"])
+            if task["parallel"].get("validationBase"):
+                prompt += (f"\nDependency results changed. This worktree is integrating revision {task['parallel']['validationBase']}. "
+                           "Resolve any pending merge conflicts, revalidate this task against the updated dependencies, and commit the result.")
             if continuation_prompt is None:
                 prompt += self.db.attachment_prompt(task_id)
             await self._set_task(task_id, run_state=RunState.RUNNING.value)
             options = await self.execution_options(task.get("model"), task.get("reasoningEffort"))
-            turn_id = await self.server.start_turn(thread_id, prompt, task_id=task_id, **options)
+            current = self.db.get_task(task_id)
+            if current["parallel"].get("paused") or current["status"] != "in_progress" or (current["parentId"] and self.db.get_task(current["parentId"])["groupPhase"] != "submitted"):
+                return
+            turn_id = await self.parallel.execution_turn(task, thread_id, prompt, options)
             self._register_turn(task_id, turn_id)
             self._starting_tasks.discard(task_id)
             run = self.db.latest_run(task_id)
@@ -839,7 +869,7 @@ class Scheduler:
         except UsageLimitExceeded as exc:
             await self._quota_wait(task_id, exc, None)
         except Exception as exc:
-            await self._fail_task(task_id, {"code": getattr(exc, "code", "TURN_FAILED"), "message": str(exc)})
+            await self._fail_task(task_id, {"code": getattr(exc, "code", "TURN_FAILED"), "message": str(exc)}, uncertain=bool(self._task_turns.get(task_id)))
         finally:
             self._starting_tasks.discard(task_id)
 
@@ -851,7 +881,7 @@ class Scheduler:
             raise
         except Exception as exc:
             if self._task_turns.get(task_id) == turn_id:
-                await self._fail_task(task_id, {"code": "RECOVERED_TURN_FAILED", "message": str(exc)})
+                await self._fail_task(task_id, {"code": "RECOVERED_TURN_FAILED", "message": str(exc)}, uncertain=True)
 
     def _register_turn(self, task_id: str, turn_id: str) -> None:
         self._task_turns[task_id] = turn_id
@@ -862,6 +892,8 @@ class Scheduler:
         task = self.db.get_task(task_id)
         if task_id in self._manual_overrides:
             return
+        if task["parallel"].get("paused") or (task["parentId"] and self.db.get_task(task["parentId"])["groupPhase"] in {"pausing", "paused"}):
+            return
         if task["status"] != TaskStatus.IN_PROGRESS.value:
             return
         turn_id = _identifier(result, "turnId", "id")
@@ -871,6 +903,12 @@ class Scheduler:
         run = self.db.latest_run(task_id)
         if not current_turn and run and run["turnId"] == turn_id and run["runState"] in {"completed", "failed", "waiting_quota", "interrupted"}:
             return
+        if _turn_status(result) in {"completed", "complete", "succeeded", "failed", "interrupted"}:
+            if task["parallel"].get("nativeConflict") or task["parallel"].get("uncertainExecution"):
+                self.db.set_parallel(task_id, nativeConflict=False, uncertainExecution=None, uncertainObservation=False, waitReason=None)
+        for operation in self.db.operations(task_id, "execution"):
+            if operation["payload"].get("turnId") == turn_id:
+                self.db.save_operation(operation["id"], task_id, "execution", "completed", observedResult=_turn_status(result))
         prior_error = self._turn_errors.pop(turn_id, None) if turn_id else None
         status = _turn_status(result)
         error = _structured_error(result) or _structured_error(prior_error)
@@ -912,6 +950,8 @@ class Scheduler:
     ) -> None:
         task = self.db.get_task(task_id)
         if task["status"] != TaskStatus.IN_PROGRESS.value:
+            return
+        if await self.parallel.completed(task_id, result, summary):
             return
         project = self.db.get_project(task["projectId"])
         status = TaskStatus.IN_REVIEW.value if project["reviewRequired"] else TaskStatus.DONE.value
@@ -957,6 +997,8 @@ class Scheduler:
             )
         except Exception:
             pass
+        self.db.release_execution(task_id)
+        self.db.finish_queue(task_id)
         structured = {
             "code": "UsageLimitExceeded",
             "message": str(error),
@@ -991,7 +1033,7 @@ class Scheduler:
             await self._publish_run(run, task["projectId"], task_id)
         self.kick()
 
-    async def _fail_task(self, task_id: str, error: Any) -> None:
+    async def _fail_task(self, task_id: str, error: Any, *, uncertain: bool = False) -> None:
         if task_id in self._manual_overrides:
             return
         try:
@@ -1000,6 +1042,13 @@ class Scheduler:
             return
         if task["status"] != TaskStatus.IN_PROGRESS.value:
             return
+        code = error.get("code", "") if isinstance(error, dict) else ""
+        uncertain = uncertain or code in {"CODEX_APP_SERVER_UNAVAILABLE", "SCHEDULER_ERROR", "TRANSPORT_ERROR", "RECOVERY_UNKNOWN", "RECOVERY_READ_FAILED", "RECOVERY_RESUME_FAILED"}
+        if uncertain:
+            self.db.set_parallel(task_id, nativeConflict=True, uncertainObservation=True, waitReason="回合状态待核对，连接中断不代表执行已停止")
+        else:
+            self.db.release_execution(task_id)
+        self.db.finish_queue(task_id)
         updated = await self._set_task(
             task_id,
             run_state=RunState.FAILED.value,
@@ -1075,6 +1124,7 @@ class Scheduler:
             raise ValidationError(f"Task must be {status.value} for this action")
 
     async def _handle_notification(self, method: str, params: dict[str, Any]) -> None:
+        auxiliary = self.parallel.auxiliary(params)
         turn_id = _identifier(params, "turnId")
         if turn_id and method in {"error", "turn/error", "turn/failed"}:
             self._turn_errors[turn_id] = params
@@ -1104,13 +1154,13 @@ class Scheduler:
                     kind = APPROVAL_METHODS.get(params["requestMethod"], "user_input")
                     interaction = self.db.create_interaction(task_id=task_id, kind=kind,
                                                              request_id=request_id, payload=params)
-                    updated = await self._set_task(task_id, run_state="waiting_input" if kind == "user_input" else "waiting_approval")
+                    updated = None if auxiliary else await self._set_task(task_id, run_state="waiting_input" if kind == "user_input" else "waiting_approval")
                     if updated:
                         await self._publish_task(updated)
                     await self._publish_interaction(interaction)
-            elif method == "turn/started":
+            elif method == "turn/started" and not auxiliary:
                 await self._adopt_turn(task_id, params.get("turn", {}))
-            elif method == "turn/completed":
+            elif method == "turn/completed" and not auxiliary:
                 await self._handle_turn_result(task_id, params)
             elif method == "serverRequest/resolved":
                 for interaction in self.db.list_interactions(task_id, pending_only=True):
@@ -1118,7 +1168,7 @@ class Scheduler:
                         resolved = self.db.resolve_interaction(interaction["id"], interaction["version"], {"resolvedInCodex": True})
                         await self._publish_interaction(resolved)
                 task = self.db.get_task(task_id)
-                if task_id not in self._manual_overrides and task["status"] == "in_progress" and task["runState"] in {"waiting_input", "waiting_approval"} and not self.db.list_interactions(task_id, pending_only=True):
+                if not auxiliary and task_id not in self._manual_overrides and task["status"] == "in_progress" and task["runState"] in {"waiting_input", "waiting_approval"} and not self.db.list_interactions(task_id, pending_only=True):
                     updated = await self._set_task(task_id, run_state="running")
                     if updated:
                         await self._publish_task(updated)
@@ -1159,6 +1209,9 @@ class Scheduler:
             reset_at = utc_now()
         if reset_at is None:
             return
+        for operation in self.db.operations(kind="merge"):
+            if operation["state"] == "waiting_quota":
+                self.db.save_operation(operation["id"], operation["task_id"], "merge", "waiting_quota", resumeAt=str(reset_at))
         for task in self.db.waiting_quota_tasks():
             run = self.db.update_latest_run(task["id"], resume_at=str(reset_at))
             if run:
@@ -1240,7 +1293,7 @@ class Scheduler:
         # server-request bridge between interaction creation and publication.
         self._interaction_waiters[interaction["id"]] = waiter
         next_state = RunState.WAITING_INPUT.value if kind == "user_input" else RunState.WAITING_APPROVAL.value
-        updated = await self._set_task(task_id, run_state=next_state)
+        updated = None if self.parallel.auxiliary(params) else await self._set_task(task_id, run_state=next_state)
         if updated is not None:
             await self._publish_task(updated)
         await self._publish_interaction(interaction)

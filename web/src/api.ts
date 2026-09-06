@@ -113,6 +113,19 @@ function normalizeTask(value: unknown): Task {
     title: String(item.title ?? ""),
     description: String(item.description ?? ""),
     attachments: (item.attachments ?? []) as Task["attachments"],
+    kind: item.kind === "parallel_group" ? "parallel_group" : "task",
+    schedulingMode: item.schedulingMode === "parallel" ? "parallel" : "exclusive",
+    parentId: item.parentId == null ? null : String(item.parentId),
+    writeScopes: Array.isArray(item.writeScopes) ? item.writeScopes as string[] : [],
+    targetBranch: item.targetBranch == null ? null : String(item.targetBranch),
+    groupPhase: item.groupPhase as Task["groupPhase"],
+    mergeState: (item.mergeState ?? "none") as Task["mergeState"],
+    parallel: (item.parallel ?? {}) as Task["parallel"],
+    waitReason: item.waitReason == null ? null : String(item.waitReason),
+    queued: Boolean(item.queued),
+    progress: item.progress as Task["progress"],
+    children: Array.isArray(item.children) ? item.children.map(normalizeTask) : undefined,
+    operations: Array.isArray(item.operations) ? item.operations as Task["operations"] : undefined,
     model: item.model == null ? null : String(item.model),
     executionMode: item.executionMode === "worktree" ? "worktree" : "local",
     branch: item.branch == null ? null : String(item.branch),
@@ -229,7 +242,7 @@ export async function getTask(id: string): Promise<Task> {
 
 export async function createTask(
   projectId: string,
-  input: { title: string; description: string; priority: TaskPriority; blockedByIds?: string[]; attachments?: AttachmentInput[]; model?: string | null; reasoningEffort?: string | null; executionMode?: "local" | "worktree"; branch?: string | null },
+  input: { title: string; description: string; priority: TaskPriority; blockedByIds?: string[]; attachments?: AttachmentInput[]; model?: string | null; reasoningEffort?: string | null; executionMode?: "local" | "worktree"; branch?: string | null; kind?: "task" | "parallel_group"; schedulingMode?: "exclusive" | "parallel"; writeScopes?: string[]; targetBranch?: string | null; requestId?: string },
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/projects/${encodeURIComponent(projectId)}/tasks`, {
     method: "POST",
@@ -240,7 +253,7 @@ export async function createTask(
 export async function updateTask(
   id: string,
   version: number,
-  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch">> & { attachments?: import("./types").AttachmentInput[] }),
+  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("./types").AttachmentInput[] }),
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -262,7 +275,8 @@ export type TaskAction =
   | "retry"
   | "submit_review_feedback"
   | "complete"
-  | "cancel";
+  | "cancel"
+  | "pause" | "resume" | "group_submit" | "group_pause" | "group_resume" | "merge_retry" | "attach_worktree" | "attach_thread";
 
 export async function taskAction(
   id: string,
@@ -273,7 +287,7 @@ export async function taskAction(
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/tasks/${encodeURIComponent(id)}/actions`, {
     method: "POST",
-    body: JSON.stringify({ action, version, ...(feedback ? { feedback } : {}), ...(targetStatus ? { targetStatus } : {}) }),
+    body: JSON.stringify({ action, version, requestId: crypto.randomUUID(), ...(feedback ? { feedback } : {}), ...(targetStatus ? { targetStatus } : {}) }),
   }));
 }
 
@@ -362,4 +376,30 @@ export function previewAttachment(id: string) {
 
 export function openAttachment(id: string) {
   return request(`/api/attachments/${encodeURIComponent(id)}/open`, { method: "POST" });
+}
+
+export async function getGitContext(projectId: string): Promise<{ isGit: boolean; currentBranch: string | null; branches: string[] }> {
+  return request(`/api/projects/${encodeURIComponent(projectId)}/git-context`);
+}
+
+export async function createChild(parent: Task, input: Parameters<typeof createTask>[1]): Promise<Task> {
+  return normalizeTask(await request(`/api/tasks/${encodeURIComponent(parent.id)}/children`, {
+    method: "POST", body: JSON.stringify({ ...input, version: parent.version }),
+  }));
+}
+
+export async function generatePlan(parent: Task, requestId: string): Promise<import("./types").TaskOperation> {
+  return request(`/api/tasks/${encodeURIComponent(parent.id)}/plans`, {
+    method: "POST", body: JSON.stringify({ version: parent.version, requestId }),
+  });
+}
+
+export async function confirmPlan(parent: Task, operationId: string, tasks: import("./types").ProposedTask[]): Promise<Task> {
+  return normalizeTask(await request(`/api/tasks/${encodeURIComponent(parent.id)}/plans/confirm`, {
+    method: "POST", body: JSON.stringify({ version: parent.version, operationId, proposal: { tasks } }),
+  }));
+}
+
+export async function deleteTask(task: Task): Promise<void> {
+  await request(`/api/tasks/${encodeURIComponent(task.id)}`, { method: "DELETE", body: JSON.stringify({ version: task.version }) });
 }

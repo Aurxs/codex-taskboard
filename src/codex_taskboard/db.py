@@ -24,8 +24,9 @@ from typing import Any, Iterator
 
 from .constants import ALL_PRIORITIES, ALL_STATUSES, Priority, TaskStatus
 from .errors import ConflictError, NotFoundError, ValidationError
+from .parallel_db import ParallelDatabase
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 _UNSET = object()
 _KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 _KEY_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_-]+")
@@ -52,7 +53,7 @@ def _json_load(value: str | None, default: Any = None) -> Any:
         return default
 
 
-class Database:
+class Database(ParallelDatabase):
     """Thread-safe SQLite connection with explicit schema migrations."""
 
     def __init__(self, path: str | Path) -> None:
@@ -79,14 +80,23 @@ class Database:
     @contextmanager
     def transaction(self, *, immediate: bool = False) -> Iterator[sqlite3.Connection]:
         with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+            nested = self._conn.in_transaction
+            savepoint = "nested_" + uuid.uuid4().hex
+            self._conn.execute(f"SAVEPOINT {savepoint}" if nested else "BEGIN IMMEDIATE" if immediate else "BEGIN")
             try:
                 yield self._conn
             except Exception:
-                self._conn.rollback()
+                if nested:
+                    self._conn.execute(f"ROLLBACK TO {savepoint}")
+                    self._conn.execute(f"RELEASE {savepoint}")
+                else:
+                    self._conn.rollback()
                 raise
             else:
-                self._conn.commit()
+                if nested:
+                    self._conn.execute(f"RELEASE {savepoint}")
+                else:
+                    self._conn.commit()
 
     def _migrate(self) -> None:
         self._conn.execute(
@@ -248,6 +258,11 @@ class Database:
                     self._conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
             self._conn.execute("UPDATE schema_meta SET version = 7 WHERE singleton = 1")
             current = 7
+        if current < 8:
+            with self.transaction(immediate=True):
+                self.migrate_parallel()
+                self._conn.execute("UPDATE schema_meta SET version = 8 WHERE singleton = 1")
+            current = 8
         if current != SCHEMA_VERSION:
             raise RuntimeError(f"No migration path from schema {current}")
 
@@ -305,10 +320,14 @@ class Database:
             """,
             (task_id,),
         ).fetchall()
-        ready = row["status"] == TaskStatus.TODO.value and row["priority"] != "draft" and all(
-            blocker["status"] == TaskStatus.DONE.value for blocker in blocked_by
-        )
+        parallel = self._parallel_json(row)
+        ready = row["status"] == TaskStatus.TODO.value and row["priority"] != "draft" and self.dependencies_ready(task_id)
+        if row["kind"] == "parallel_group":
+            ready = ready and parallel["groupPhase"] == "submitted" and parallel["progress"]["total"] > 0
+        if parallel["parallel"].get("paused"):
+            ready = False
         return {
+            **parallel,
             "id": row["id"],
             "identifier": row["identifier"],
             "projectId": row["project_id"],
@@ -640,6 +659,7 @@ class Database:
         project_id: str | None = None,
         *,
         include_canceled: bool = True,
+        include_children: bool = True,
     ) -> list[dict[str, Any]]:
         with self._lock:
             clauses: list[str] = []
@@ -649,6 +669,8 @@ class Database:
                 params.append(project_id)
             if not include_canceled:
                 clauses.append("status <> 'canceled'")
+            if not include_children:
+                clauses.append("parent_id IS NULL")
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             rows = self._conn.execute(
                 f"SELECT id FROM tasks {where} ORDER BY created_at, id", params
@@ -704,7 +726,15 @@ class Database:
         reasoning_effort: str | None = None,
         execution_mode: str = "local",
         branch: str | None = None,
+        kind: str = "task",
+        parent_id: str | None = None,
+        scheduling_mode: str = "exclusive",
+        write_scopes: list[str] | None = None,
+        target_branch: str | None = None,
+        blocked_by_ids: list[str] | None = None,
     ) -> dict[str, Any]:
+        if scheduling_mode == "parallel" or parent_id or kind == "parallel_group":
+            execution_mode = "worktree"
         self._validate_workspace_options(execution_mode, branch)
         title = title.strip()
         description = description or ""
@@ -736,8 +766,26 @@ class Database:
                 """,
                 (task_id, identifier, project_id, title, description, priority, model, reasoning_effort, execution_mode, branch, now, now),
             )
+            parallel_values = self.validate_parallel_options(self.get_task(task_id), {
+                "kind": kind, "parent_id": parent_id, "scheduling_mode": scheduling_mode,
+                "write_scopes": write_scopes or [], "target_branch": target_branch,
+            }, creating=True)
+            state = {"managed": bool(scheduling_mode == "parallel" or parent_id or kind == "parallel_group"),
+                     "mergeState": "none"}
+            from .git_workspace import current_branch
+            git_root = self.repo_info(self.get_task(task_id))[0]
+            state["defaultTarget"] = current_branch(git_root) if git_root else None
+            if kind == "parallel_group":
+                state["groupPhase"] = "preparing"
+            parallel_values["parallel_state"] = _json(state)
+            self._conn.execute("UPDATE tasks SET " + ", ".join(f"{k}=?" for k in parallel_values) + " WHERE id=?",
+                               [*parallel_values.values(), task_id])
             self._conn.executemany("INSERT INTO task_attachments(id, task_id, name, content) VALUES (?, ?, ?, ?)",
                                    [(aid, task_id, name, content) for aid, name, content in prepared])
+            if blocked_by_ids:
+                self.replace_dependencies(task_id, self.get_task(task_id)["version"], blocked_by_ids)
+            if parent_id:
+                self.set_parallel(parent_id, structureChangedAt=utc_now())
             return self._task_json_locked(task_id)
 
     @staticmethod
@@ -816,8 +864,25 @@ class Database:
         last_message: str | None | object = _UNSET,
         last_error: Any = _UNSET,
         attachments: list[dict[str, str]] | None = None,
+        kind: str | object = _UNSET,
+        scheduling_mode: str | object = _UNSET,
+        write_scopes: list[str] | object = _UNSET,
+        target_branch: str | None | object = _UNSET,
+        parallel: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         values: dict[str, Any] = {}
+        config = {k: v for k, v in (("kind", kind), ("scheduling_mode", scheduling_mode),
+                                   ("write_scopes", write_scopes), ("target_branch", target_branch)) if v is not _UNSET}
+        if config:
+            current = self.get_task(task_id)
+            values.update(self.validate_parallel_options(current, config))
+            if values["scheduling_mode"] == "parallel" or values["kind"] == "parallel_group":
+                parallel = {**(parallel or {}), "managed": True}
+                execution_mode = "worktree"
+            elif not current["parallel"].get("baseCommit"):
+                parallel = {**(parallel or {}), "managed": False}
+        if parallel is not None:
+            values["parallel_state"] = _json({**self.get_task(task_id)["parallel"], **parallel})
         if execution_mode is not _UNSET or branch is not _UNSET:
             current = self.get_task(task_id)
             mode = current["executionMode"] if execution_mode is _UNSET else execution_mode
@@ -916,96 +981,42 @@ class Database:
                 )
             self._conn.executemany("INSERT INTO task_attachments(id, task_id, name, content) VALUES (?, ?, ?, ?)",
                                    [(aid, task_id, name, content) for aid, name, content in prepared])
-            return self._task_json_locked(task_id)
+            updated = self._task_json_locked(task_id)
+            if target_branch is not _UNSET and updated["kind"] == "parallel_group":
+                self._conn.execute("UPDATE tasks SET target_branch=?,version=version+1 WHERE parent_id=? AND thread_id IS NULL AND worktree_path IS NULL", (updated["targetBranch"], task_id))
+            if status is not _UNSET and status != "in_progress":
+                self.release_execution(task_id, scopes=status in {"done", "canceled"} or not updated["parallel"].get("managed"))
+                self.finish_queue(task_id)
+            return updated
 
     def claim_next_ready(self, project_id: str) -> dict[str, Any] | None:
-        """Atomically claim the highest priority/FIFO ready task."""
+        """Atomically claim the next eligible leaf, with no parallel count limit."""
+        from .parallel_db import rank
+        self.get_project(project_id)
         with self.transaction(immediate=True):
-            project = self._conn.execute(
-                "SELECT id FROM projects WHERE id = ?", (project_id,)
-            ).fetchone()
-            if project is None:
-                raise NotFoundError(f"Project {project_id} was not found")
-            active = self._conn.execute(
-                "SELECT 1 FROM tasks WHERE project_id = ? AND status = 'in_progress' LIMIT 1",
-                (project_id,),
-            ).fetchone()
-            if active is not None:
-                return None
-            row = self._conn.execute(
-                """
-                SELECT t.id
-                FROM tasks t
-                WHERE t.project_id = ?
-                  AND t.status = 'todo'
-                  AND t.priority <> 'draft'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM task_dependencies d
-                    JOIN tasks blocker ON blocker.id = d.blocker_task_id
-                    WHERE d.blocked_task_id = t.id
-                      AND blocker.status <> 'done'
-                  )
-                ORDER BY CASE t.priority
-                    WHEN 'urgent' THEN 0
-                    WHEN 'high' THEN 1
-                    WHEN 'medium' THEN 2
-                    WHEN 'low' THEN 3
-                    ELSE 4 END,
-                    t.created_at, t.id
-                LIMIT 1
-                """,
-                (project_id,),
-            ).fetchone()
-            if row is None:
-                return None
-            now = utc_now()
-            cursor = self._conn.execute(
-                """
-                UPDATE tasks
-                SET status = 'in_progress', run_state = 'starting', updated_at = ?, version = version + 1
-                WHERE id = ? AND status = 'todo'
-                """,
-                (now, row["id"]),
-            )
-            if cursor.rowcount != 1:
-                return None
-            return self._task_json_locked(row["id"])
+            for task in sorted(self.list_tasks(project_id), key=rank):
+                if task["parentId"] or task["kind"] != "task":
+                    continue
+                claimed = self.claim_candidate(task["id"])
+                if claimed:
+                    return claimed
+        return None
 
     def claim_task(self, task_id: str, expected_version: int) -> dict[str, Any]:
-        """Atomically claim one explicitly selected ready task."""
         with self.transaction(immediate=True):
-            task = self._conn.execute(
-                "SELECT * FROM tasks WHERE id = ?", (task_id,)
-            ).fetchone()
-            if task is None:
-                raise NotFoundError(f"Task {task_id} was not found")
-            if int(task["version"]) != expected_version:
+            task = self.get_task(task_id)
+            if task["version"] != expected_version:
                 raise ConflictError("Task changed; refresh before running it")
             if task["priority"] == "draft":
                 raise ValidationError("请先将草稿改为其他优先级，再执行任务")
-            if task["status"] != TaskStatus.TODO.value:
+            if task["status"] != "todo":
                 raise ValidationError("Only todo tasks can be run")
-            blockers = self._conn.execute(
-                """
-                SELECT blocker.status
-                FROM task_dependencies d JOIN tasks blocker ON blocker.id = d.blocker_task_id
-                WHERE d.blocked_task_id = ? AND blocker.status <> 'done'
-                """,
-                (task_id,),
-            ).fetchall()
-            if blockers:
+            if not self.dependencies_ready(task_id):
                 raise ValidationError("Task dependencies are not complete")
-            active = self._conn.execute(
-                "SELECT 1 FROM tasks WHERE project_id = ? AND status = 'in_progress' LIMIT 1",
-                (task["project_id"],),
-            ).fetchone()
-            if active is not None:
-                raise ConflictError("This project already has a running task")
-            self._conn.execute(
-                "UPDATE tasks SET status = 'in_progress', run_state = 'starting', updated_at = ?, version = version + 1 WHERE id = ?",
-                (utc_now(), task_id),
-            )
-            return self._task_json_locked(task_id)
+            result = self.claim_candidate(task_id, expected_version=expected_version)
+            if result is None:
+                raise ConflictError("This project already has a running task or reserved resources")
+            return result
 
     def replace_dependencies(
         self,
@@ -1017,12 +1028,16 @@ class Database:
         unique_ids = list(dict.fromkeys(blocker_ids))
         with self.transaction(immediate=True):
             task = self._conn.execute(
-                "SELECT id, project_id, version FROM tasks WHERE id = ?", (task_id,)
+                "SELECT * FROM tasks WHERE id = ?", (task_id,)
             ).fetchone()
             if task is None:
                 raise NotFoundError(f"Task {task_id} was not found")
             if int(task["version"]) != expected_version:
                 raise ConflictError("Task changed; refresh before editing dependencies")
+            if task["parent_id"]:
+                self.require_group_editable(task["parent_id"])
+                if task["thread_id"] or task["worktree_path"]:
+                    raise ValidationError("已经执行过的子任务不能修改依赖，请添加补充任务")
             if task_id in unique_ids:
                 raise ValidationError("A task cannot block itself")
             if len(unique_ids) > 100:
@@ -1030,9 +1045,11 @@ class Database:
             if unique_ids:
                 placeholders = ",".join("?" for _ in unique_ids)
                 rows = self._conn.execute(
-                    f"SELECT id, project_id FROM tasks WHERE id IN ({placeholders})",
+                    f"SELECT id, project_id, parent_id FROM tasks WHERE id IN ({placeholders})",
                     unique_ids,
                 ).fetchall()
+                if any(row["parent_id"] != task["parent_id"] for row in rows):
+                    raise ValidationError("跨组依赖请连接顶层任务；子任务只能依赖同组子任务")
                 known = {row["id"]: row["project_id"] for row in rows}
                 missing = [item for item in unique_ids if item not in known]
                 if missing:
@@ -1092,6 +1109,13 @@ class Database:
 
     def delete_task(self, task_id: str, expected_version: int) -> None:
         with self.transaction(immediate=True):
+            task = self.get_task(task_id)
+            if task["parentId"]:
+                self.require_group_editable(task["parentId"])
+                if task["threadId"] or task["worktreePath"]:
+                    raise ValidationError("已执行的子任务需要保留历史")
+            if task["kind"] == "parallel_group" and self.children(task_id):
+                raise ValidationError("请先移除未执行的子任务；已有执行历史的任务组请取消保留")
             row = self._conn.execute(
                 "SELECT status, version FROM tasks WHERE id = ?", (task_id,)
             ).fetchone()

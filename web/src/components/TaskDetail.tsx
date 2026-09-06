@@ -1,10 +1,12 @@
 import { ActivityTool, ActivityToolIcon } from "./ActivityTool";
+import { GroupTasks } from "./GroupTasks";
+import { getTask, type TaskAction } from "../api";
 import { t, getLocale, localizeError } from "../i18n";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { AttachmentButton, pastedFiles, readAttachments, validateAttachments } from "./AttachmentButton";
 import { DependencyPicker } from "./DependencyPicker";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ActivityItem, Interaction, Task, TaskPriority, TaskStatus } from "../types";
+import type { ActivityItem, ExecutionOptions, Interaction, Task, TaskPriority, TaskStatus } from "../types";
 import { PRIORITY_LABELS, RUN_STATE_LABELS, STATUS_LABELS, TASK_PRIORITIES } from "../types";
 import { LinearIcon } from "./LinearIcon";
 import { PriorityIcon, ProjectIcon, StatusIcon } from "./SemanticIcons";
@@ -80,13 +82,15 @@ export function TaskDetail({
   onDependencies,
   onAction,
   onResolveInteraction,
+  onOpenTask,
 }: {
+  onOpenTask: (task: Task) => void;
   task: Task;
   tasks: Task[];
   onBack: () => void;
-  onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch">> & { attachments?: import("../types").AttachmentInput[] })) => Promise<Task | null>;
+  onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[] })) => Promise<Task | null>;
   onDependencies: (task: Task, ids: string[]) => Promise<Task | null>;
-  onAction: (task: Task, action: "run" | "retry" | "interrupt_requeue" | "submit_review_feedback" | "complete" | "cancel" | "follow_up", feedback?: string, targetStatus?: "in_review" | "done") => Promise<Task | null>;
+  onAction: (task: Task, action: TaskAction, feedback?: string, targetStatus?: "in_review" | "done") => Promise<Task | null>;
   onResolveInteraction: (interaction: Interaction, response: unknown) => Promise<void>;
 }) {
   const [current, setCurrent] = useState(task);
@@ -101,6 +105,19 @@ export function TaskDetail({
   const [propertyOpen, setPropertyOpen] = useState(false);
   const [followup, setFollowup] = useState("");
   const [sending, setSending] = useState(false);
+  const [threadInput, setThreadInput] = useState("");
+  const [settingsDraft, setSettingsDraft] = useState<ExecutionOptions | null>(null);
+  const [parentTask, setParentTask] = useState<Task | null>(null);
+  useEffect(() => { let active = true; if (task.parentId) void getTask(task.parentId).then(parent => { if (active) setParentTask(parent); }).catch(() => {}); else setParentTask(null); return () => { active = false; }; }, [task.parentId, task.version]);
+  useEffect(() => { setSettingsDraft(null); }, [task.id]);
+  const [worktreeInput, setWorktreeInput] = useState("");
+  const [executionPickerOpen, setExecutionPickerOpen] = useState(false);
+  const isGroup = current.kind === "parallel_group";
+  const managed = !!current.parallel?.managed;
+  const paused = !!current.parallel?.paused;
+  const dependencyCandidates = current.parentId ? parentTask?.children ?? [] : tasks;
+  const dependencyLocked = !!current.parentId && (!!current.threadId || !!current.worktreePath || !parentTask || !["preparing", "paused"].includes(parentTask.groupPhase ?? ""));
+  async function refreshCurrent() { setCurrent(await getTask(current.id)); }
   const sendingRef = useRef(false);
   async function sendFollowup() {
     if (!followup.trim() || sendingRef.current) return;
@@ -145,7 +162,7 @@ export function TaskDetail({
   }, [task]);
 
   const pendingInteractions = useMemo(() => (current.interactions ?? []).filter((interaction) => interaction.status === "pending"), [current.interactions]);
-  async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch">> & { attachments?: import("../types").AttachmentInput[] })) {
+  async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[] })) {
     setSaving(true);
     try {
       const next = await onUpdate(current, changes);
@@ -185,7 +202,7 @@ export function TaskDetail({
                 <div className="property-row issue-detail-inline-properties">
                   <TaskPropertyPicker value={priority} options={TASK_PRIORITIES.map((item) => ({ value: item, label: PRIORITY_LABELS[item], className: `priority-${item}`, icon: <PriorityIcon priority={item} size={14} /> }))} open={propertyOpen} onOpenChange={setPropertyOpen} onChange={(value) => { const next = value as TaskPriority; dirty.current.priority = true; drafts.current.priority = next; setPriority(next); void save({ priority: next }); }} ariaLabel={t("优先级")} title={t("优先级：{0}", PRIORITY_LABELS[priority])} triggerClassName={`property-priority priority-${priority}`} />
                   <span className="property-control"><StatusIcon status={current.status === "canceled" ? "todo" : current.status as TaskStatus} size={14} /><span>{current.status === "canceled" ? t("已取消") : STATUS_LABELS[current.status as TaskStatus] ?? current.status}</span></span>
-                  <DependencyPicker candidates={tasks.filter(item => item.id !== current.id && item.status !== "canceled")} value={current.blockedBy.map(item => item.id)} onChange={ids => void dependencyChange(ids)} />
+                  <DependencyPicker disabled={dependencyLocked} candidates={dependencyCandidates.filter(item => item.id !== current.id && item.status !== "canceled")} value={current.blockedBy.map(item => item.id)} onChange={ids => void dependencyChange(ids)} />
                   <AttachmentButton count={current.attachments?.length ?? 0} disabled={saving || addingAttachments} onAdd={files => void addFiles(files)} />
                   {current.threadId && <button type="button" className="property-control" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: current.threadId } })}><ProjectIcon size={14} /><span>{t("在 Codex 中打开")}</span></button>}
                 </div>
@@ -194,6 +211,9 @@ export function TaskDetail({
                 {attachmentError && <p className="form-error" role="alert">{localizeError(attachmentError)}</p>}
               </div>
             </div>
+            {isGroup && <GroupTasks group={current} onRefresh={refreshCurrent} onOpen={onOpenTask} />}
+            {(current.waitReason || paused || current.parallel?.needsValidation) && <p className="task-wait-reason" role="status">{current.waitReason ? localizeError(current.waitReason) : current.parallel?.needsValidation ? t("前置成果已修改，需要重新验证") : t("已暂停")}</p>}
+            {managed && current.mergeState && current.mergeState !== "none" && <p className="task-merge-state">{t("合入状态")} · {current.mergeState === "pending_review" ? t("等待审阅") : current.mergeState === "queued" ? t("等待合入") : current.mergeState === "merging" ? t("合入中") : current.mergeState === "merged" ? t("已合入") : t("需要处理")}</p>}
             <section className="activity-section">
               <div className="activity-heading"><h2>{t("执行记录")}</h2><span>{current.runState ? RUN_STATE_LABELS[current.runState] : t("未运行")}</span></div>
               {current.activityError && <p className="activity-empty">{localizeError(current.activityError)}</p>}
@@ -211,7 +231,7 @@ export function TaskDetail({
               {pendingInteractions.length > 0 && <div className="interaction-list">{pendingInteractions.map((interaction) => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</div>}
             </section>
             </div>
-            {current.threadId && ["in_progress", "in_review", "done"].includes(current.status) && <form className="task-followup" onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
+            {!isGroup && current.threadId && ["in_progress", "in_review", "done"].includes(current.status) && <form className="task-followup" onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
               <textarea aria-label={t("跟进 Codex 会话")} placeholder={t("向 Codex 补充细节或继续处理…")} title={t("Enter 发送 · Shift+Enter 换行")} rows={2} value={followup} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendFollowup(); } }} />
               <div className="task-followup-footer"><button type="submit" aria-label={t("发送跟进消息")} title={sending ? t("正在发送…") : t("发送跟进消息")} aria-busy={sending} disabled={sending || !followup.trim()}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg></button></div>
             </form>}
@@ -219,17 +239,42 @@ export function TaskDetail({
           <aside className="issue-properties">
             <h2>{t("任务属性")}</h2>
             <div className="detail-primary-actions">
-              {current.status === "todo" && <button className="detail-open-thread-action" type="button" disabled={!current.ready || saving} onClick={() => void onAction(current, "run")}><LinearIcon name="play" />{current.priority === "draft" ? t("草稿暂不执行") : current.ready ? t("立即交给 Codex") : t("等待前置任务完成")}</button>}
-              {current.status === "in_progress" && current.runState === "waiting_quota" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "retry")}><LinearIcon name="play" />{t("手动续跑")}</button>}
-              {current.status === "in_progress" && current.runState === "failed" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "retry")}><LinearIcon name="play" />{t("重试任务")}</button>}
-              {current.status === "in_progress" && <button className="detail-copy-action" type="button" onClick={() => void onAction(current, "interrupt_requeue")}><LinearIcon name="pause" />{t("暂停并退回草稿")}</button>}
-              {current.status === "in_review" && <><button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "complete")}><LinearIcon name="check" />{t("接受并完成")}</button><textarea className="review-feedback-input" rows={3} value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder={t("审阅未通过时填写反馈…")} /><button className="detail-copy-action" type="button" disabled={!feedback.trim()} onClick={() => { void onAction(current, "submit_review_feedback", feedback.trim()); setFeedback(""); }}>{t("退回修改")}</button></>}
+              {isGroup ? <>
+                {current.groupPhase === "preparing" && <button className="detail-open-thread-action" type="button" disabled={!current.progress?.total || saving} onClick={() => void onAction(current, "group_submit")}>{t("提交执行")}</button>}
+                {current.groupPhase === "submitted" && current.status === "todo" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "run")}>{t("运行任务组")}</button>}
+                {(current.groupPhase === "submitted" || current.groupPhase === "pausing") && !["done", "canceled"].includes(current.status) && <button className="detail-copy-action" type="button" onClick={() => void onAction(current, "group_pause")}>{current.groupPhase === "pausing" ? t("确认暂停") : t("暂停任务组")}</button>}
+                {current.groupPhase === "paused" && current.status !== "canceled" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "group_resume")}>{t("继续任务组")}</button>}
+              </> : <>
+                {current.status === "todo" && !paused && !current.parentId && <button className="detail-open-thread-action" type="button" disabled={!current.ready || saving || current.queued} onClick={() => void onAction(current, "run")}><LinearIcon name="play" />{current.queued ? t("已排队") : current.priority === "draft" ? t("草稿暂不执行") : current.ready ? t("立即交给 Codex") : t("等待前置任务完成")}</button>}
+                {current.status === "in_progress" && !paused && ["waiting_quota", "failed"].includes(current.runState ?? "") && current.mergeState !== "blocked" && <button className="detail-open-thread-action" type="button" disabled={current.queued} onClick={() => void onAction(current, "retry")}><LinearIcon name="play" />{t("重试任务")}</button>}
+                {(current.status === "in_progress" || managed && current.status === "in_review") && !paused && !current.parentId && <button className="detail-copy-action" type="button" onClick={() => void onAction(current, managed ? "pause" : "interrupt_requeue")}><LinearIcon name="pause" />{managed ? t("暂停任务") : t("暂停并退回草稿")}</button>}
+                {paused && !current.parentId && current.status !== "canceled" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "resume")}>{t("继续任务")}</button>}
+              </>}
+              {current.status === "in_review" && !paused && current.mergeState !== "merging" && current.mergeState !== "queued" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "complete")}><LinearIcon name="check" />{managed ? t("确认并合入") : t("接受并完成")}</button>}
+              {!isGroup && current.status === "in_review" && !paused && <><textarea className="review-feedback-input" rows={3} value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder={t("审阅未通过时填写反馈…")} /><button className="detail-copy-action" type="button" disabled={!feedback.trim()} onClick={() => { void onAction(current, "submit_review_feedback", feedback.trim()).then(next => { if (next) setFeedback(""); }); }}>{t("退回修改")}</button></>}
+              {managed && current.mergeState === "blocked" && !paused && <button type="button" className="detail-open-thread-action" onClick={() => void onAction(current, "merge_retry")}>{t("重试合并")}</button>}
+              {!!current.parallel?.uncertainThread && <div className="worktree-recovery"><input aria-label={t("已有会话 ID")} placeholder={t("已有会话 ID")} value={threadInput} onChange={event => setThreadInput(event.target.value)} /><button type="button" disabled={!threadInput.trim()} onClick={() => void onAction(current, "attach_thread", threadInput.trim())}>{t("关联已有会话")}</button></div>}
+              {current.parallel?.uncertainWorktree && <div className="worktree-recovery"><input aria-label={t("已有工作树路径")} placeholder={t("已有工作树路径")} value={worktreeInput} onChange={event => setWorktreeInput(event.target.value)} /><button type="button" disabled={!worktreeInput.trim()} onClick={() => void onAction(current, "attach_worktree", worktreeInput.trim())}>{t("关联已有工作树")}</button></div>}
+              {current.operations?.filter(op => op.kind === "merge" && op.payload.threadId && op.state !== "completed").map(op => <button key={op.id} type="button" className="detail-copy-action" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: op.payload.threadId } })}>{t("打开合并会话")}</button>)}
             </div>
             <div className="issue-property-list"><button className="detail-property-row" type="button"><span>{t("编号")}</span><strong>{current.identifier}</strong></button><div className="detail-property-row"><span>{t("状态")}</span><strong>{current.status === "canceled" ? t("已取消") : STATUS_LABELS[current.status as TaskStatus] ?? current.status}</strong></div><div className="detail-property-row"><span>{t("优先级")}</span><strong>{PRIORITY_LABELS[current.priority]}</strong></div><div className="detail-property-row"><span>{t("更新")}</span><strong>{relativeTime(current.updatedAt)}</strong></div><div className="detail-property-row"><span>{t("运行阶段")}</span><strong>{current.runState ? RUN_STATE_LABELS[current.runState] : "—"}</strong></div></div>
-            <ExecutionSettings value={current} workspaceLocked={!!current.threadId || !!current.worktreePath} disabled={saving || current.status === "in_progress"} onChange={value => void save(value)} />
+            {!current.parentId && <TaskPropertyPicker ariaLabel={t("执行方式")} value={current.schedulingMode ?? "exclusive"} open={executionPickerOpen} onOpenChange={setExecutionPickerOpen} disabled={!!current.threadId || !!current.worktreePath || saving}
+              options={[{ value: "exclusive", label: t("独占执行") }, { value: "parallel", label: t("允许并行") }]} onChange={value => void save({ schedulingMode: value === "parallel" ? "parallel" : "exclusive" })} />}
+            <ExecutionSettings defaultTarget={current.parallel?.defaultTarget as string ?? null} scopeSummary={isGroup ? [...new Set(current.children?.flatMap(child => child.writeScopes ?? []) ?? [])] : undefined} value={settingsDraft ?? current} isChild={!!current.parentId} workspaceLocked={!!current.threadId || !!current.worktreePath} disabled={saving || (current.status === "in_progress" && !paused)} onChange={setSettingsDraft} />
+            {settingsDraft && <button className="detail-copy-action" type="button" disabled={saving} onClick={() => { void save(settingsDraft).then(next => { if (next) setSettingsDraft(null); }); }}>{t("保存设置")}</button>}
             {current.worktreePath && <small className="task-worktree-path">{current.worktreePath}</small>}
-            <IssueRelations task={current} candidates={tasks} onChange={(ids) => void dependencyChange(ids)} />
-            {(current.status === "todo" || current.status === "in_review") && <button className="detail-copy-action detail-cancel-action" type="button" onClick={() => { if (window.confirm(t("确定取消这个任务吗？"))) void onAction(current, "cancel"); }}>{t("取消任务")}</button>}
+            {managed && <details className="merge-history"><summary>{t("合入记录")} · {(current.operations ?? []).filter(op => op.kind === "merge").length}</summary>
+              <p>{t("合入目标")} <code>{current.targetBranch ?? "—"}</code></p>
+              {typeof current.parallel?.baseCommit === "string" && <p>{t("起始提交")} <code title={current.parallel.baseCommit}>{current.parallel.baseCommit.slice(0, 12)}</code></p>}
+              {(current.operations ?? []).filter(op => op.kind === "merge").slice().reverse().map(op => <div className="merge-history-entry" key={op.id}>
+                <strong>{String(op.payload.targetBranch ?? "")} · {op.state === "completed" ? t("已合入") : op.state === "blocked" || op.state === "uncertain" ? t("需要处理") : op.state === "superseded" ? t("目标已更新") : t("合入中")}</strong>
+                <p>{t("源提交")} <code title={String(op.payload.sourceCommit ?? "")}>{String(op.payload.sourceCommit ?? "—").slice(0, 12)}</code></p>
+                <p>{t("结果提交")} <code title={String(op.payload.resultCommit ?? "")}>{String(op.payload.resultCommit ?? "—").slice(0, 12)}</code></p>
+                {op.payload.threadId && <button className="detail-copy-action" type="button" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: op.payload.threadId } })}>{t("打开合并会话")}</button>}
+              </div>)}
+            </details>}
+            <IssueRelations disabled={dependencyLocked} task={current} candidates={dependencyCandidates} onChange={(ids) => void dependencyChange(ids)} />
+            {current.status !== "done" && current.status !== "canceled" && <button className="detail-copy-action detail-cancel-action" type="button" onClick={() => { if (window.confirm(t("确定取消这个任务吗？"))) void onAction(current, "cancel"); }}>{t("取消任务")}</button>}
           </aside>
         </div>
       </div>

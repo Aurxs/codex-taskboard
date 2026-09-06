@@ -91,13 +91,15 @@ try {
   await page.keyboard.press('Escape');
   await popup.waitFor({ state: 'hidden' });
   assert.ok(await dialog.isVisible(), 'Escape closes only the floating panel');
-  await dialog.getByRole('button', { name: '模型', exact: true }).click();
+  await dialog.getByRole('button', { name: '更多', exact: true }).click();
+  await ui.getByRole('button', { name: /^模型：/ }).click();
   await ui.getByRole('listbox', { name: '模型', exact: true }).waitFor();
   await page.screenshot({ path: 'output/playwright/model-popover.png' });
   assert.deepEqual(await box(), initial, 'model picker must not reflow composer');
   await ui.getByRole('option', { name: 'gpt-6-astra', exact: true }).click();
-  await dialog.getByRole('button', { name: '推理强度', exact: true }).click();
+  await ui.getByRole('button', { name: /^推理强度：/ }).click();
   await ui.getByRole('option', { name: '高 · high', exact: true }).click();
+  await page.keyboard.press('Escape');
   await dialog.getByRole('button', { name: '优先级', exact: true }).click();
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
@@ -105,7 +107,7 @@ try {
   for (const width of [1200, 600, 400]) {
     await page.evaluate(width => { document.querySelector('iframe').style.width = `${width}px`; }, width);
     await checkBounds(dialog);
-    for (const name of ['模型', '推理强度', '阻塞于']) {
+    for (const name of ['更多', '阻塞于']) {
       await dialog.getByRole('button', { name, exact: true }).click();
       await popup.waitFor();
       await checkBounds(popup);
@@ -115,9 +117,10 @@ try {
     }
   }
   await page.evaluate(() => { document.querySelector('iframe').style.width = '1200px'; });
-  await dialog.getByRole('button', { name: '模型', exact: true }).click();
+  await dialog.getByRole('button', { name: '更多', exact: true }).click();
+  await ui.getByRole('button', { name: /^模型：/ }).click();
   await page.screenshot({ path: 'output/playwright/popover-outside.png' });
-  await dialog.locator('.composer-description').click({ position: { x: 500, y: 40 } });
+  await dialog.locator('.composer-description').click({ position: { x: 20, y: 40 } });
   await popup.waitFor({ state: 'hidden' });
   await page.screenshot({ path: 'output/playwright/task-controls.png' });
   await dialog.getByRole('button', { name: '创建任务', exact: true }).click();
@@ -130,7 +133,7 @@ try {
   const alignment = await ui.locator('.issue-detail-main').evaluate(el => ['.issue-title-input', '.issue-description-read', '.activity-heading'].map(selector => el.querySelector(selector).getBoundingClientRect().left));
   assert.ok(Math.max(...alignment) - Math.min(...alignment) < 2, `detail alignment: ${alignment}`);
   assert.equal(await ui.locator('.activity-entry').count(), 15, 'history is not truncated to 12 entries');
-  await ui.getByText('查看调用详情', { exact: true }).click();
+  await ui.locator('.activity-tool-details summary').filter({ hasText: 'imagegen' }).click();
   await ui.locator('.activity-content pre').waitFor();
   for (const width of [1200, 600]) {
     await page.evaluate(width => { document.querySelector('iframe').style.width = `${width}px`; }, width);

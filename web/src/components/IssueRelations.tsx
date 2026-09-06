@@ -7,7 +7,9 @@ export function IssueRelations({
   task,
   candidates,
   onChange,
+  disabled = false,
 }: {
+  disabled?: boolean;
   task: Task;
   candidates: Task[];
   onChange: (ids: string[]) => void;
@@ -16,7 +18,7 @@ export function IssueRelations({
   return (
     <div className="issue-relation-sidebar">
       <h2>{t("依赖关系")}</h2>
-      <DependencyPicker candidates={candidateTasks} value={task.blockedBy.map(item => item.id)} onChange={onChange} />
+      <DependencyPicker disabled={disabled} candidates={candidateTasks} value={task.blockedBy.map(item => item.id)} onChange={onChange} />
       <div className="issue-relation-group is-blocks">
         <header><span><BlockingRelationIcon type="blocks" size={14} />{t("阻塞了")}</span><span>{task.blocks.length}</span></header>
         <div className="issue-sub-issue-list">

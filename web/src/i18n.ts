@@ -35,6 +35,13 @@ export function t(key: MessageKey, ...values: Array<string | number>): string {
 
 /** Translate only known application messages, never task content or Codex output. */
 export function localizeError(message: string): string {
+  const patterns: [RegExp, MessageKey][] = [
+    [/^等待前序独占任务 (.+)$/, "等待前序独占任务 {0}"],
+    [/^等待任务 (.+) 的修改范围释放或合入$/, "等待任务 {0} 的修改范围释放或合入"],
+    [/^修改超出声明范围：(.*)$/, "修改超出声明范围：{0}"],
+    [/^合并修复超出声明范围：(.*)$/, "合并修复超出声明范围：{0}"],
+  ];
+  for (const [pattern, key] of patterns) { const match = message.match(pattern); if (match) return t(key, match[1]); }
   if (Object.hasOwn(en, message)) return t(message as MessageKey);
   if (locale === "zh-CN") {
     const entry = Object.entries(en).find(([, english]) => english === message);

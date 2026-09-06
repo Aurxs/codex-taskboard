@@ -4,14 +4,14 @@ import { FloatingPopover } from "./FloatingPopover";
 import { LinearIcon } from "./LinearIcon";
 import type { Task } from "../types";
 
-export function DependencyPicker({ candidates, value, onChange }: { candidates: Task[]; value: string[]; onChange: (ids: string[]) => void }) {
+export function DependencyPicker({ candidates, value, onChange, disabled = false }: { disabled?: boolean; candidates: Task[]; value: string[]; onChange: (ids: string[]) => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const [search, setSearch] = useState("");
   const available = candidates.filter(task => `${task.identifier} ${task.title}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   return <div className="dependency-picker">
-    <button ref={trigger} type="button" className="property-control dependency-trigger" aria-label={t("阻塞于")} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>{t("阻塞于")} <span>{value.length || t("无")}</span><LinearIcon name="chevronDown" className="picker-chevron" /></button>
+    <button ref={trigger} type="button" disabled={disabled} className="property-control dependency-trigger" aria-label={t("阻塞于")} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>{t("阻塞于")} <span>{value.length || t("无")}</span><LinearIcon name="chevronDown" className="picker-chevron" /></button>
     <FloatingPopover open={open} anchor={trigger} onClose={() => setOpen(false)} label={t("选择前置任务")} width={340}>
     <div className="dependency-picker-panel" role="dialog" aria-label={t("选择前置任务")}>
       <input className="dependency-search" aria-label={t("搜索前置任务")} placeholder={t("搜索任务…")} value={search} onChange={event => setSearch(event.target.value)} />

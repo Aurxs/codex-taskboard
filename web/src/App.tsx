@@ -333,7 +333,7 @@ function EmbeddedTaskboard() {
       }));
       if (selectedTaskIdRef.current) {
         const next = await getTask(selectedTaskIdRef.current);
-        setDetail(current => current?.id === next.id && next.version >= current.version ? next : current);
+        setDetail(current => current?.id === next.id && next.version >= current.version ? { ...next, children: next.children ?? current.children, operations: next.operations ?? current.operations } : current);
       }
       setConnectionError(null);
     } catch (error) {
@@ -361,10 +361,10 @@ function EmbeddedTaskboard() {
 
   const updateTaskInState = useCallback((next: Task) => {
     setTasks((current) => current.map((task) => task.id === next.id && next.version >= task.version ? next : task));
-    setDetail((current) => current?.id === next.id && next.version >= current.version ? next : current);
+    setDetail((current) => current?.id === next.id && next.version >= current.version ? { ...next, children: next.children ?? current.children, operations: next.operations ?? current.operations } : current);
   }, []);
 
-  const updateTaskResource = useCallback(async (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch">> & { attachments?: import("./types").AttachmentInput[] })) => {
+  const updateTaskResource = useCallback(async (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("./types").AttachmentInput[] })) => {
     try {
       const next = await updateTask(task.id, task.version, changes);
       updateTaskInState(next);
@@ -392,7 +392,7 @@ function EmbeddedTaskboard() {
     try {
       const next = await taskAction(task.id, action, task.version, feedback, targetStatus);
       updateTaskInState(next);
-      notify(action === "complete" ? t("任务已完成") : action === "run" || action === "retry" ? t("任务已提交给 Codex") : t("操作已提交"), "success");
+      notify(next.queued ? t("已排队") : action === "complete" && next.status === "done" ? t("任务已完成") : action === "complete" && next.mergeState === "queued" ? t("等待合入") : action === "run" || action === "retry" ? t("任务已提交给 Codex") : t("操作已提交"), "success");
       return next;
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) await refreshTasks();
@@ -412,11 +412,15 @@ function EmbeddedTaskboard() {
     }
   }, [notify, selectedProject]);
 
-  async function handleCreateTask(input: { title: string; description: string; priority: TaskPriority; blockedByIds: string[]; model: string | null; reasoningEffort: string | null }) {
+  async function handleCreateTask(input: Parameters<typeof createTask>[1]) {
     if (!selectedProject) return;
     const created = await createTask(selectedProject.id, input);
     setTasks((current) => [...current, created]);
     notify(t("任务已创建"), "success");
+    if (created.kind === "parallel_group") {
+      setSelectedTaskId(created.id); setDetail(await getTask(created.id));
+      return;
+    }
     if (input.priority !== "draft" && editorStatus && editorStatus !== "todo") {
       const next = await performAction(created, editorStatus === "in_progress" ? "run" : "complete", undefined, editorStatus === "in_review" ? "in_review" : editorStatus === "done" ? "done" : undefined);
       if (next) updateTaskInState(next);
@@ -499,18 +503,18 @@ function EmbeddedTaskboard() {
 
         {!selectedTask && selectedProject && <BoardToolbar search={search} onSearch={setSearch} includeCanceled={includeCanceled} onIncludeCanceled={setIncludeCanceled} />}
         {syncError && <ErrorBanner message={syncError} onRetry={() => setSyncAttempt(value => value + 1)} />}
-        {!hostContext || loading || projects.length === 0 || !selectedProject ? <HostWaitingMessage hasProjects={Boolean(hostContext?.projects?.length)} /> : selectedTask ? <TaskDetail key={selectedTask.id} task={selectedTask} tasks={tasks.filter((task) => task.status !== "canceled")} onBack={() => { setSelectedTaskId(null); setDetail(null); }} onUpdate={updateTaskResource} onDependencies={updateDependencies} onAction={performAction} onResolveInteraction={resolveTaskInteraction} /> : (
+        {!hostContext || loading || projects.length === 0 || !selectedProject ? <HostWaitingMessage hasProjects={Boolean(hostContext?.projects?.length)} /> : selectedTask ? <TaskDetail key={selectedTask.id} task={selectedTask} tasks={tasks.filter((task) => task.status !== "canceled")} onBack={() => { if (selectedTask.parentId) { setSelectedTaskId(selectedTask.parentId); void getTask(selectedTask.parentId).then(setDetail).catch(error => notify(compactError(error), "error")); } else { setSelectedTaskId(null); setDetail(null); } }} onOpenTask={task => { setSelectedTaskId(task.id); setDetail(task); void getTask(task.id).then(setDetail).catch(error => notify(compactError(error), "error")); }} onUpdate={updateTaskResource} onDependencies={updateDependencies} onAction={performAction} onResolveInteraction={resolveTaskInteraction} /> : (
           <div className={`issue-board-layout${includeCanceled ? " has-other-tasks" : ""}`} data-main-columns={4}>
             <div className="board-scroll" aria-label={t("议题看板")}>
               <div className="board">
-                {COLUMN_ORDER.map((status) => <BoardColumn key={status} status={status} tasks={grouped[status]} isDropTarget={dropTarget === status} draggedTaskId={draggedTaskId} onCreate={setEditorStatus} onEdit={(task) => { setSelectedTaskId(task.id); setDetail(task); void getTask(task.id).then(next => setDetail(current => current?.id === next.id && next.version >= current.version ? next : current)).catch((error) => notify(compactError(error), "error")); }} onComplete={(task) => { if (window.confirm(t("确定完成 {0} 吗？", task.identifier))) void performAction(task, "complete"); }} onDragStart={(task) => setDraggedTaskId(task.id)} onDragEnd={() => { setDraggedTaskId(null); setDropTarget(null); }} onDragEnter={setDropTarget} onDrop={(column, taskId) => void drop(column, taskId)} />)}
+                {COLUMN_ORDER.map((status) => <BoardColumn key={status} status={status} tasks={grouped[status]} isDropTarget={dropTarget === status} draggedTaskId={draggedTaskId} onCreate={setEditorStatus} onEdit={(task) => { setSelectedTaskId(task.id); setDetail(task); void getTask(task.id).then(next => setDetail(current => current?.id === next.id && next.version >= current.version ? { ...next, children: next.children ?? current.children, operations: next.operations ?? current.operations } : current)).catch((error) => notify(compactError(error), "error")); }} onComplete={(task) => { if (window.confirm(t(task.parallel?.managed ? "确认并合入 {0} 的当前成果？" : "确定完成 {0} 吗？", task.identifier))) void performAction(task, "complete"); }} onDragStart={(task) => setDraggedTaskId(task.id)} onDragEnd={() => { setDraggedTaskId(null); setDropTarget(null); }} onDragEnter={setDropTarget} onDrop={(column, taskId) => void drop(column, taskId)} />)}
               </div>
             </div>
-            {includeCanceled && <aside className="other-tasks-panel is-open" id="canceled-tasks-panel" aria-label={t("已取消任务")}><header className="other-tasks-header"><div className="other-tasks-heading"><TaskboardIcon name="panel" /><h2>{t("已取消")}</h2></div><button className="icon-button other-tasks-close" type="button" onClick={() => setIncludeCanceled(false)} aria-label={t("关闭已取消任务")}><LinearIcon name="close" /></button></header><div className="other-tasks-list">{visibleTasks.filter((task) => task.status === "canceled").map((task) => <TaskCard key={task.id} task={task} isDragging={false} onEdit={(item) => { setSelectedTaskId(item.id); setDetail(item); void getTask(item.id).then(next => setDetail(current => current?.id === next.id && next.version >= current.version ? next : current)).catch((error) => notify(compactError(error), "error")); }} onComplete={() => undefined} onDragStart={() => undefined} onDragEnd={() => undefined} />)}{visibleTasks.filter((task) => task.status === "canceled").length === 0 && <div className="other-tasks-empty"><strong>{t("没有已取消任务")}</strong><span>{t("被取消的任务会显示在这里。")}</span></div>}</div></aside>}
+            {includeCanceled && <aside className="other-tasks-panel is-open" id="canceled-tasks-panel" aria-label={t("已取消任务")}><header className="other-tasks-header"><div className="other-tasks-heading"><TaskboardIcon name="panel" /><h2>{t("已取消")}</h2></div><button className="icon-button other-tasks-close" type="button" onClick={() => setIncludeCanceled(false)} aria-label={t("关闭已取消任务")}><LinearIcon name="close" /></button></header><div className="other-tasks-list">{visibleTasks.filter((task) => task.status === "canceled").map((task) => <TaskCard key={task.id} task={task} isDragging={false} onEdit={(item) => { setSelectedTaskId(item.id); setDetail(item); void getTask(item.id).then(next => setDetail(current => current?.id === next.id && next.version >= current.version ? { ...next, children: next.children ?? current.children, operations: next.operations ?? current.operations } : current)).catch((error) => notify(compactError(error), "error")); }} onComplete={() => undefined} onDragStart={() => undefined} onDragEnd={() => undefined} />)}{visibleTasks.filter((task) => task.status === "canceled").length === 0 && <div className="other-tasks-empty"><strong>{t("没有已取消任务")}</strong><span>{t("被取消的任务会显示在这里。")}</span></div>}</div></aside>}
           </div>
         )}
       </main>
-      {editorStatus && selectedProject && <TaskEditor initialStatus={editorStatus} task={null} candidates={tasks} onClose={() => setEditorStatus(null)} onCreate={async (input) => { await handleCreateTask(input); }} onUpdate={async () => undefined} />}
+      {editorStatus && selectedProject && <TaskEditor projectId={selectedProject.id} initialStatus={editorStatus} task={null} candidates={tasks} onClose={() => setEditorStatus(null)} onCreate={async (input) => { await handleCreateTask(input); }} onUpdate={async () => undefined} />}
       <div className="notice-stack" aria-live="polite">{notices.map((notice) => <div className={`notice notice-${notice.tone}`} key={notice.id}>{localizeError(notice.message)}</div>)}</div>
       {connectionError && <div className="board-sync-indicator" role="alert">{localizeError(connectionError)}</div>}
     </div>

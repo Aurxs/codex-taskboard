@@ -2,17 +2,20 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, 
 import { createPortal } from "react-dom";
 
 /** Portal to the frame body so composer overflow never clips a picker. */
-export function FloatingPopover({ open, anchor, onClose, children, label, width = 300 }: {
+export function FloatingPopover({ open, anchor, onClose, children, label, width = 300, onEscape }: {
   open: boolean;
   anchor: RefObject<HTMLElement | null>;
   onClose: () => void;
   children: ReactNode;
   label: string;
   width?: number;
+  onEscape?: () => boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
+  const escape = useRef(onEscape);
+  escape.current = onEscape;
   const [position, setPosition] = useState<CSSProperties>({ visibility: "hidden" });
   useLayoutEffect(() => {
     if (!open || !anchor.current || !panel.current) return;
@@ -49,6 +52,7 @@ export function FloatingPopover({ open, anchor, onClose, children, label, width 
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopImmediatePropagation();
+        if (escape.current?.()) return;
         close.current();
         trigger.focus();
       }

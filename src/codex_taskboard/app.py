@@ -74,6 +74,10 @@ class TaskExecutionBody(StrictModel):
     branch: str | None = Field(default=None, min_length=1, max_length=255)
     model: str | None = Field(default=None, min_length=1, max_length=200)
     reasoningEffort: str | None = Field(default=None, min_length=1, max_length=40)
+    kind: Literal["task", "parallel_group"] = "task"
+    schedulingMode: Literal["exclusive", "parallel"] = "exclusive"
+    writeScopes: list[str] = Field(default_factory=list)
+    targetBranch: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class AttachmentBody(StrictModel):
@@ -87,6 +91,20 @@ class TaskCreateBody(TaskExecutionBody):
     priority: Literal["urgent", "high", "medium", "low", "none", "draft"] = "none"
     blockedByIds: list[str] = Field(default_factory=list)
     attachments: list[AttachmentBody] = Field(default_factory=list, max_length=10)
+    requestId: str | None = None
+
+
+class ChildCreateBody(TaskCreateBody):
+    version: int = Field(ge=1)
+
+
+class PlanGenerateBody(VersionBody):
+    requestId: str
+
+
+class PlanConfirmBody(VersionBody):
+    operationId: str
+    proposal: dict[str, Any]
 
 
 class TaskUpdateBody(TaskExecutionBody):
@@ -107,6 +125,7 @@ class ActionBody(StrictModel):
     version: int = Field(ge=1)
     feedback: str | None = None
     targetStatus: Literal["in_review", "done"] | None = None
+    requestId: str | None = None
 
 
 class InteractionResolveBody(StrictModel):
@@ -350,24 +369,23 @@ def create_app(
     @app.get("/api/projects/{project_id}/tasks")
     async def project_tasks(project_id: str, includeCanceled: bool = True) -> dict[str, Any]:
         db.get_project(project_id)
-        return {"tasks": db.list_tasks(project_id, include_canceled=includeCanceled)}
+        return {"tasks": db.list_tasks(project_id, include_canceled=includeCanceled, include_children=False)}
 
     @app.post("/api/projects/{project_id}/tasks", status_code=201)
     async def create_task(project_id: str, body: TaskCreateBody) -> dict[str, Any]:
         await scheduler.execution_options(body.model, body.reasoningEffort)
-        task = db.create_task(
-            execution_mode=body.executionMode,
-            branch=body.branch,
-            model=body.model,
-            reasoning_effort=body.reasoningEffort,
-            project_id=project_id,
-            title=body.title,
-            description=body.description,
-            priority=body.priority,
-            attachments=[item.model_dump() for item in body.attachments],
-        )
-        if body.blockedByIds:
-            task = db.replace_dependencies(task["id"], task["version"], body.blockedByIds)
+        with db.transaction(immediate=True):
+            if body.requestId:
+                previous = db.operation(body.requestId)
+                if previous:
+                    existing = db.get_task(previous["task_id"])
+                    if previous["kind"] != "create" or existing["projectId"] != project_id:
+                        raise ConflictError("操作标识已被使用")
+                    return existing
+            fields = body.model_dump(exclude={"requestId"})
+            task = db.create_task(project_id=project_id, **_snake_task_fields(fields))
+            if body.requestId:
+                db.save_operation(body.requestId, task["id"], "create", "completed")
         await events.publish("task.updated", project_id=project_id, task_id=task["id"], payload=task)
         scheduler.kick()
         return task
@@ -423,6 +441,8 @@ def create_app(
         task["activity"] = db.list_activity(task_id)
         task["runs"] = db.list_runs(task_id)
         task["interactions"] = db.list_interactions(task_id)
+        task["children"] = db.children(task_id)
+        task["operations"] = db.operations(task_id)
         return task
 
     @app.patch("/api/tasks/{task_id}")
@@ -430,11 +450,11 @@ def create_app(
         fields = body.model_dump(exclude={"version"}, exclude_unset=True, by_alias=False)
         if "model" in fields or "reasoningEffort" in fields:
             current = db.get_task(task_id)
-            if current["status"] == "in_progress":
+            if current["status"] == "in_progress" and not current["parallel"].get("paused"):
                 raise ValidationError("请先暂停任务，再修改模型或推理强度")
             await scheduler.execution_options(fields.get("model", current.get("model")), fields.get("reasoningEffort", current.get("reasoningEffort")))
         for field, value in fields.items():
-            if value is None and field not in {"model", "reasoningEffort", "branch"}:
+            if value is None and field not in {"model", "reasoningEffort", "branch", "targetBranch"}:
                 raise ValidationError(f"{field} cannot be null")
         task = db.update_task(task_id, body.version, **_snake_task_fields(fields))
         await events.publish("task.updated", project_id=task["projectId"], task_id=task_id, payload=task)
@@ -461,8 +481,64 @@ def create_app(
         scheduler.kick()
         return task
 
+    @app.get("/api/projects/{project_id}/git-context")
+    async def git_context(project_id: str) -> dict[str, Any]:
+        from . import git_workspace as git
+        workspace = db.get_project(project_id)["workspacePath"]
+        try:
+            root, _ = await asyncio.to_thread(git.repository, workspace)
+            branches = await asyncio.to_thread(git.git, root, "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes")
+            return {"isGit": True, "currentBranch": git.current_branch(root), "branches": branches.splitlines()}
+        except TaskboardError:
+            return {"isGit": False, "currentBranch": None, "branches": []}
+
+    @app.post("/api/tasks/{group_id}/children", status_code=201)
+    async def create_child(group_id: str, body: ChildCreateBody) -> dict[str, Any]:
+        if body.kind != "task":
+            raise ValidationError("不支持嵌套任务组")
+        await scheduler.execution_options(body.model, body.reasoningEffort)
+        with db.transaction(immediate=True):
+            group = db.require_group_editable(group_id)
+            if body.requestId:
+                previous = db.operation(body.requestId)
+                if previous and previous["kind"] == "create" and db.get_task(previous["task_id"])["parentId"] == group_id:
+                    return db.get_task(previous["task_id"])
+                if previous:
+                    raise ConflictError("操作标识已被使用")
+            if group["version"] != body.version:
+                raise ConflictError("任务组已变化，请刷新后添加")
+            child = db.create_task(project_id=group["projectId"], parent_id=group_id,
+                                   **_snake_task_fields(body.model_dump(exclude={"version", "requestId"})))
+            if body.requestId:
+                db.save_operation(body.requestId, child["id"], "create", "completed")
+        await scheduler.parallel.publish(child["id"])
+        return child
+
+    @app.post("/api/tasks/{group_id}/plans", status_code=202)
+    async def generate_plan(group_id: str, body: PlanGenerateBody) -> dict[str, Any]:
+        group = db.get_task(group_id)
+        existing = db.operation(body.requestId)
+        if group["version"] != body.version and not existing:
+            raise ConflictError("任务组已变化，请刷新后生成草案")
+        return await scheduler.parallel.generate_plan(group, body.requestId)
+
+    @app.post("/api/tasks/{group_id}/plans/confirm")
+    async def confirm_plan(group_id: str, body: PlanConfirmBody) -> dict[str, Any]:
+        return await scheduler.parallel.confirm_plan(group_id, body.version, body.operationId, body.proposal)
+
     @app.post("/api/tasks/{task_id}/actions")
     async def task_action(task_id: str, body: ActionBody) -> dict[str, Any]:
+        if body.requestId:
+            operation = db.operation(body.requestId)
+            if operation:
+                if operation["task_id"] != task_id or operation["kind"] != "action":
+                    raise ConflictError("操作标识已被使用")
+                if operation["state"] == "completed":
+                    return db.get_task(task_id)
+                raise ConflictError("操作结果待核对，请刷新任务状态")
+            if db.get_task(task_id)["version"] != body.version:
+                raise ConflictError("任务已变化，请刷新后操作")
+            db.save_operation(body.requestId, task_id, "action", "pending", action=body.action)
         task = await scheduler.action(
             task_id,
             body.action,
@@ -470,6 +546,8 @@ def create_app(
             body.feedback,
             target_status=body.targetStatus,
         )
+        if body.requestId:
+            db.save_operation(body.requestId, task_id, "action", "completed", action=body.action)
         return task
 
     @app.post("/api/interactions/{interaction_id}/resolve")
@@ -536,7 +614,9 @@ def _snake_project_fields(fields: dict[str, Any]) -> dict[str, Any]:
 
 
 def _snake_task_fields(fields: dict[str, Any]) -> dict[str, Any]:
-    return {({"reasoningEffort": "reasoning_effort", "executionMode": "execution_mode"}.get(key, key)): value for key, value in fields.items()}
+    mapping = {"reasoningEffort": "reasoning_effort", "executionMode": "execution_mode", "schedulingMode": "scheduling_mode",
+               "writeScopes": "write_scopes", "targetBranch": "target_branch", "blockedByIds": "blocked_by_ids"}
+    return {mapping.get(key, key): value for key, value in fields.items()}
 
 
 app = create_app()

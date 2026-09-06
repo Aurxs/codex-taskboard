@@ -82,7 +82,20 @@ export interface ExecutionOptions {
   branch: string | null;
   model: string | null;
   reasoningEffort: string | null;
+  kind?: "task" | "parallel_group";
+  schedulingMode?: "exclusive" | "parallel";
+  writeScopes?: string[];
+  targetBranch?: string | null;
 }
+
+export interface TaskOperation {
+  id: string;
+  kind: string;
+  state: string;
+  payload: { threadId?: string; error?: unknown; proposal?: { tasks: ProposedTask[] }; [key: string]: unknown };
+}
+
+export interface ProposedTask { key: string; title: string; description: string; blockedByKeys: string[]; writeScopes: string[] }
 
 export interface CodexModel {
   model: string;
@@ -92,6 +105,15 @@ export interface CodexModel {
 }
 
 export interface Task extends ExecutionOptions {
+  parentId?: string | null;
+  groupPhase?: "preparing" | "submitted" | "pausing" | "paused" | null;
+  mergeState?: "none" | "pending_review" | "queued" | "merging" | "blocked" | "merged";
+  queued?: boolean;
+  waitReason?: string | null;
+  parallel?: { managed?: boolean; paused?: boolean; uncertainWorktree?: string; needsValidation?: boolean; nativeConflict?: boolean; [key: string]: unknown };
+  progress?: { total: number; integrated: number; running: number; attention: number };
+  children?: Task[];
+  operations?: TaskOperation[];
   worktreePath: string | null;
   id: string;
   identifier: string;
