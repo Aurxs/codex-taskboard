@@ -737,6 +737,13 @@ class CdpInjector:
         else:
             message = {"type": "mcp-request", "hostId": "local", "request": {
                 "id": request_id, "method": method, "params": params}}
+            # Native composer flows capture a browser route for their thread.
+            # Taskboard can start/resume turns without opening that composer,
+            # so bind the session to this host window before dispatching input.
+            # This registers routing only; Codex still owns browser permissions.
+            browser_route = ""
+            if method in {"turn/start", "turn/steer"} and isinstance(params.get("threadId"), str) and params["threadId"]:
+                browser_route = f"await window.electronBridge.sendMessageFromView({json.dumps({'type': 'browser-use-session-route-capture', 'conversationId': params['threadId']})});"
             expression = f"""new Promise((resolve, reject) => {{
               const id = {json.dumps(request_id)};
               const finish = (value) => {{ clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); }};
@@ -745,7 +752,7 @@ class CdpInjector:
               }});
               const timer = setTimeout(() => finish({{error: {{message: 'Codex 响应超时，请检查会话后再重试'}}}}), {int(timeout * 1000)});
               window.addEventListener('message', receive);
-              try {{ Promise.resolve(window.electronBridge.sendMessageFromView({json.dumps(message)})).catch(error => finish({{error: {{message: String(error)}}}})); }}
+              try {{ (async () => {{ {browser_route} await window.electronBridge.sendMessageFromView({json.dumps(message)}); }})().catch(error => finish({{error: {{message: String(error)}}}})); }}
               catch (error) {{ finish({{error: {{message: String(error)}}}}); }}
             }})"""
         result = connection.request("Runtime.evaluate", {"expression": expression, "awaitPromise": True, "returnByValue": True}, timeout=timeout + 2)

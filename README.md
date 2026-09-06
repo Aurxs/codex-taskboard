@@ -55,6 +55,8 @@ Ordinary tasks and subtasks that are running, in review, or completed have a pin
 
 Normal development and packaged launches share the desktop's existing App Server without synthetic native notifications or changes to its composer. Live events are backed by a latest-turn check every five seconds. Legacy task pause returns to draft; managed parallel tasks preserve their delivery state and require confirmed interruption before releasing reservations. Restart the launcher after upgrading to load these changes. Backend-only / no-injector diagnostic modes retain an isolated stdio server and do not provide native bidirectional sync.
 
+Before starting or steering a task turn through the desktop connection, Taskboard registers the native browser route for that conversation so enabled in-app browser tools can run without first opening the native conversation. Codex continues to manage browser plugins, site permissions, and approvals. Isolated stdio diagnostic modes do not provide this desktop browser integration.
+
 ![Task details](docs/images/task-detail-en.png)
 
 Ordinary exclusive tasks offer the current project directory or a new worktree. New worktrees use the Codex desktop's native creation, ownership, and cleanup services and require a desktop connection. Enter an existing local or remote starting branch (for example, `main` or `origin/main`), or leave it empty to copy the current working tree state. Codex manages the independent checkout from that starting point. Once execution starts, location and branch are locked; retries and follow-ups reuse the saved worktree and conversation. Task details show the actual worktree path. If creation times out or the connection drops, check Codex for a created worktree before retrying.
