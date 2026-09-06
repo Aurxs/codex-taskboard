@@ -76,8 +76,16 @@ try {
     assert.ok(r.left >= 0 && r.right <= r.width + 1 && r.top >= 0 && r.bottom <= r.height + 1, JSON.stringify(r));
   };
   await dialog.getByLabel('任务标题', { exact: true }).fill('验证任务');
+  const pills = await dialog.locator('.composer-properties .property-control').evaluateAll(elements => elements.map(el => ({ height: el.getBoundingClientRect().height, radius: parseFloat(getComputedStyle(el).borderRadius) })));
+  assert.ok(pills.every(pill => pill.height === 24 && pill.radius >= pill.height / 2), 'all composer controls use compact pills');
+  assert.equal(await dialog.getByRole('button', { name: '模型', exact: true }).textContent(), '模型');
+  assert.equal(await dialog.getByRole('button', { name: '推理强度', exact: true }).textContent(), '推理强度');
   const initial = await box();
-  await dialog.getByRole('button', { name: '阻塞于', exact: true }).click();
+  assert.equal(await dialog.getByRole('button', { name: '阻塞于', exact: true }).count(), 0);
+  assert.ok(await dialog.getByRole('button', { name: '推理强度', exact: true }).isDisabled());
+  await dialog.getByRole('button', { name: '更多', exact: true }).click();
+  assert.equal(await ui.getByRole('button', { name: /^模型：|^推理强度：/ }).count(), 0);
+  await ui.getByRole('button', { name: /^阻塞于：/ }).click();
   const dependencies = ui.getByRole('dialog', { name: '选择前置任务', exact: true });
   await dependencies.waitFor();
   assert.deepEqual(await box(), initial, 'dependency popover must not reflow composer');
@@ -89,17 +97,26 @@ try {
   await dependencies.getByLabel('搜索前置任务').fill('前置任务 16');
   await dependencies.getByRole('checkbox').check();
   await page.keyboard.press('Escape');
+  assert.ok(await ui.getByRole('button', { name: '阻塞于：1', exact: true }).isVisible());
+  await page.keyboard.press('Escape');
   await popup.waitFor({ state: 'hidden' });
   assert.ok(await dialog.isVisible(), 'Escape closes only the floating panel');
-  await dialog.getByRole('button', { name: '更多', exact: true }).click();
-  await ui.getByRole('button', { name: /^模型：/ }).click();
+  await dialog.getByRole('button', { name: '模型', exact: true }).click();
   await ui.getByRole('listbox', { name: '模型', exact: true }).waitFor();
   await page.screenshot({ path: 'output/playwright/model-popover.png' });
   assert.deepEqual(await box(), initial, 'model picker must not reflow composer');
   await ui.getByRole('option', { name: 'gpt-6-astra', exact: true }).click();
-  await ui.getByRole('button', { name: /^推理强度：/ }).click();
+  await dialog.getByRole('button', { name: '推理强度', exact: true }).click();
   await ui.getByRole('option', { name: '高 · high', exact: true }).click();
-  await page.keyboard.press('Escape');
+  await popup.waitFor({ state: 'hidden' });
+  await dialog.getByRole('button', { name: '模型', exact: true }).click();
+  await ui.getByRole('option', { name: '沿用 Codex 会话', exact: true }).click();
+  assert.ok(await dialog.getByRole('button', { name: '推理强度', exact: true }).isDisabled());
+  await dialog.getByRole('button', { name: '模型', exact: true }).click();
+  await ui.getByRole('option', { name: 'gpt-6-astra', exact: true }).click();
+  await dialog.getByRole('button', { name: '推理强度', exact: true }).click();
+  assert.equal(await ui.getByRole('option', { name: '低 · low', exact: true }).getAttribute('aria-selected'), 'true');
+  await ui.getByRole('option', { name: '高 · high', exact: true }).click();
   await dialog.getByRole('button', { name: '优先级', exact: true }).click();
   await page.keyboard.press('End');
   await page.keyboard.press('Enter');
@@ -107,7 +124,7 @@ try {
   for (const width of [1200, 600, 400]) {
     await page.evaluate(width => { document.querySelector('iframe').style.width = `${width}px`; }, width);
     await checkBounds(dialog);
-    for (const name of ['更多', '阻塞于']) {
+    for (const name of ['更多', '模型', '推理强度']) {
       await dialog.getByRole('button', { name, exact: true }).click();
       await popup.waitFor();
       await checkBounds(popup);
@@ -117,8 +134,7 @@ try {
     }
   }
   await page.evaluate(() => { document.querySelector('iframe').style.width = '1200px'; });
-  await dialog.getByRole('button', { name: '更多', exact: true }).click();
-  await ui.getByRole('button', { name: /^模型：/ }).click();
+  await dialog.getByRole('button', { name: '模型', exact: true }).click();
   await page.screenshot({ path: 'output/playwright/popover-outside.png' });
   await dialog.locator('.composer-description').click({ position: { x: 20, y: 40 } });
   await popup.waitFor({ state: 'hidden' });

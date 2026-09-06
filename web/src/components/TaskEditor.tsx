@@ -3,7 +3,6 @@ import { AttachmentButton, pastedFiles, readAttachments, validateAttachments } f
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { AttachmentInput, Task, TaskPriority, TaskStatus } from "../types";
 import { PRIORITY_LABELS, TASK_PRIORITIES } from "../types";
-import { DependencyPicker } from "./DependencyPicker";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
 import { ExecutionSettings } from "./ExecutionSettings";
 import type { ExecutionOptions } from "../types";
@@ -101,9 +100,7 @@ export function TaskEditor({
               onChange={mode => setExecution(current => ({ ...current, schedulingMode: mode === "parallel" ? "parallel" : "exclusive", executionMode: mode === "parallel" || current.kind === "parallel_group" ? "worktree" : "local", branch: null }))} />}
 
             <TaskPropertyPicker ariaLabel={t("优先级")} value={priority} open={priorityOpen} onOpenChange={setPriorityOpen} options={TASK_PRIORITIES.map(item => ({ value: item, label: PRIORITY_LABELS[item] }))} onChange={value => setPriority(value as TaskPriority)} />
-            <DependencyPicker candidates={available} value={blockedByIds} onChange={setBlockedByIds} />
-            <AttachmentButton count={(task?.attachments?.length ?? 0) + files.length} disabled={saving} onAdd={addFiles} />
-            <ExecutionSettings defaultTarget={defaultTarget} value={execution} onChange={setExecution} isChild={!!parent} workspaceLocked={!!task?.threadId || !!task?.worktreePath} disabled={saving || (task?.status === "in_progress" && !task.parallel?.paused)} errorMessage={error} />
+            <ExecutionSettings primaryControls toolbarAction={<AttachmentButton count={(task?.attachments?.length ?? 0) + files.length} disabled={saving} onAdd={addFiles} />} dependencies={{ candidates: available, value: blockedByIds, onChange: setBlockedByIds, disabled: saving }} defaultTarget={defaultTarget} value={execution} onChange={setExecution} isChild={!!parent} workspaceLocked={!!task?.threadId || !!task?.worktreePath} disabled={saving || (task?.status === "in_progress" && !task.parallel?.paused)} errorMessage={error} />
           </div>
           {priority === "draft" && <p className="composer-draft-note">{t("草稿不会被 Codex 认领，修改优先级后即可发布。")}</p>}
           {execution.kind === "parallel_group" && <p className="composer-draft-note">{t("创建后进入详情添加子任务，统一提交后执行。")}</p>}

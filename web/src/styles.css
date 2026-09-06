@@ -12003,7 +12003,7 @@ kbd {
 .task-dialog .composer-title textarea { height: 32px; min-height: 32px; line-height: 26px; font-size: 18px; }
 .task-dialog .composer-description textarea { height: 88px; min-height: 88px; padding: 0; margin: 0; font-size: 13px; line-height: 22px; resize: vertical; }
 .composer-properties { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 8px; }
-.composer-properties .property-control { height: 30px; box-sizing: border-box; border-radius: 7px; padding: 0 10px; font-size: 12px; }
+.composer-properties .property-control { height: 24px; box-sizing: border-box; border-radius: 9999px; padding: 0 10px; font-size: 12px; }
 .composer-properties .property-control select { height: 28px; padding: 0 18px 0 0; line-height: normal; }
 .composer-properties .dependency-picker-panel { margin-top: 8px; }
 .execution-settings select { height: 34px; padding: 0 9px; font-size: 12px; border-radius: 7px; }
@@ -12148,8 +12148,9 @@ button.attachment-link { width: 100%; border: 0; background: transparent; text-a
 
 /* Compact creation toolbar and the shared, bounded More settings surface. */
 .task-dialog .composer-properties { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
-.task-dialog .composer-properties > .task-property-picker { min-width: 0; }
-.task-dialog .composer-properties .property-control { white-space: nowrap; width: auto; }
+.task-dialog .composer-properties > .task-property-picker { min-width: 0; max-width: 100%; }
+.task-dialog .composer-properties .property-control { white-space: nowrap; width: auto; max-width: 100%; gap: 8px; }
+.task-dialog .composer-properties .task-property-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .compact-settings { display: inline-flex; flex: 0 0 auto; gap: 0; }
 .app-shell .issue-properties .compact-settings { display: inline-flex; margin: 10px 0; }
 .more-settings-trigger { display: inline-flex; align-items: center; gap: 5px; }
