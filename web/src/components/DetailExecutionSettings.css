@@ -1,0 +1,25 @@
+.detail-execution-settings .settings-row { display: flex; gap: 12px; align-items: center; border: 0; width: 100%; min-height: 38px; padding: 8px 12px; background: transparent; color: var(--text-primary); text-align: left; font: inherit; cursor: pointer; }
+.detail-execution-settings .settings-row:hover:not(:disabled), .detail-execution-settings .settings-choices button:hover:not(:disabled) { background: var(--surface-hover); }
+.detail-execution-settings .settings-row:disabled { cursor: default; opacity: .6; }
+.detail-execution-settings .settings-row-label { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.detail-execution-settings .settings-row-label i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-secondary); }
+.detail-execution-settings .settings-row-value { min-width: 0; flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.detail-execution-settings .settings-row svg { transform: rotate(180deg); width: 12px; height: 12px; flex: none; color: var(--text-tertiary); }
+.detail-execution-settings .settings-reset { padding: 9px 12px; text-align: left; border: 0; border-top: 1px solid var(--border); background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; }
+.detail-execution-settings .settings-page-heading { display: flex; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid var(--border); }
+.detail-execution-settings .settings-page-heading button { display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 5px; background: transparent; color: var(--text-primary); cursor: pointer; }
+.detail-execution-settings .settings-page-heading svg { width: 14px; height: 14px; }
+.detail-execution-settings .settings-choices button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 10px 12px; border: 0; background: transparent; color: var(--text-primary); text-align: left; font: inherit; cursor: pointer; }
+.detail-execution-settings .settings-choices svg { width: 14px; height: 14px; }
+.detail-execution-settings .settings-value-editor { display: flex; flex-direction: column; gap: 10px; padding: 12px; }
+.detail-execution-settings .settings-value-editor input, .detail-execution-settings .settings-value-editor textarea, .detail-execution-settings .worktree-recovery input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 8px; color: var(--text-primary); background: var(--surface); font: inherit; }
+.detail-execution-settings .settings-value-editor textarea { resize: vertical; max-height: 150px; }
+.detail-execution-settings .settings-value-editor small, .detail-execution-settings .settings-note { color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+.detail-execution-settings .settings-note { display: block; padding: 7px 12px; }
+.detail-execution-settings .settings-value-editor .button { align-self: flex-end; min-height: 28px; }
+.detail-execution-settings { min-width: 0; font-size: 12px; }
+.detail-execution-settings .settings-row { padding: 8px 0; gap: 8px; }
+.detail-execution-settings .settings-row-value { white-space: normal; overflow-wrap: anywhere; }
+.detail-execution-settings .settings-reset { padding-left: 0; }
+.detail-settings-editor { margin: 8px 0; }
+.detail-execution-settings .settings-note { padding-left: 0; padding-right: 0; }

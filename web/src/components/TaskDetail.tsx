@@ -8,7 +8,7 @@ import type { ActivityItem, Interaction, Task, TaskPriority, TaskStatus } from "
 import { PRIORITY_LABELS, RUN_STATE_LABELS, STATUS_LABELS, TASK_PRIORITIES } from "../types";
 import { LinearIcon } from "./LinearIcon";
 import { PriorityIcon, ProjectIcon, StatusIcon } from "./SemanticIcons";
-import { ExecutionSettings } from "./ExecutionSettings";
+import { DetailExecutionSettings as ExecutionSettings } from "./DetailExecutionSettings";
 import { IssueRelations } from "./IssueRelations";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
 import { postEmbeddedHostMessage } from "../embeddedHost.mjs";
