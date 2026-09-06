@@ -90,6 +90,8 @@ Taskboard 自动跟随 Codex 的显示语言：简体中文显示中文，其余
 - 从源码运行：Python 3.13+、Node.js 22+ 和 npm。
 - 构建 App / DMG：额外需要 Xcode Command Line Tools、Rust 与 PyInstaller；Tauri CLI 已列入 npm 开发依赖。
 
+Windows 的可复用部分、适配障碍和建议验证顺序见 [Windows 兼容性评估](docs/windows-compatibility.zh-CN.md)；该评估不代表当前版本已支持 Windows。
+
 ## 快速开始
 
 ```bash
