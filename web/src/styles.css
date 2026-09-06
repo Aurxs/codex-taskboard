@@ -12098,16 +12098,16 @@ kbd {
 .issue-editor-content .composer-draft-note { margin: 4px 0 0; font-size: 11px; line-height: 18px; color: var(--text-secondary); }
 
 .app-shell .activity-agent-message p { color: var(--text-primary); font-size: 13px; line-height: 22px; white-space: pre-wrap; }
-.app-shell .activity-tool-entry { grid-template-columns: minmax(0, 1fr) max-content; }
-.activity-tool-entry > .activity-rail-icon { display: none; }
+.app-shell .activity-entry::before { left: 15.5px; }
+.app-shell .activity-entry > .activity-rail-icon { justify-self: center; }
 .activity-content .activity-tool-details { margin-top: 0; }
-.activity-tool-details > summary { display: flex; align-items: center; gap: 8px; min-width: 0; height: 24px; list-style: none; }
+.activity-tool-details > summary { display: flex; align-items: center; gap: 8px; min-width: 0; height: 24px; list-style: none; white-space: nowrap; }
 .activity-tool-details > summary::-webkit-details-marker { display: none; }
 .activity-tool-details > summary::before { content: "▸"; flex: 0 0 14px; text-align: center; }
 .activity-tool-details[open] > summary::before { content: "▾"; }
-.activity-tool-details > summary > svg { width: 16px; height: 16px; flex-shrink: 0; }
 .activity-tool-details > summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.activity-tool-details > summary > strong, .activity-tool-details > summary > small { flex-shrink: 0; }
+.activity-tool-details > summary > strong { min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+.activity-tool-details > summary > small { flex-shrink: 0; }
 .activity-command-box { margin-top: 10px; }
 .activity-command-box > strong { font-size: 11px; }
 .activity-command-box pre { margin: 4px 0 0; border: 1px solid var(--border); }

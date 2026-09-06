@@ -36,7 +36,7 @@ function CommandDetails({ item }: { item: ActivityItem }) {
   const program = executable?.[1] ?? executable?.[2] ?? executable?.[3] ?? "";
   const output = item.data?.aggregatedOutput ?? item.data?.output;
   return <details className="activity-tool-details">
-      <summary><LinearIcon name="terminal" /><strong>命令</strong><span title={program}>{program}</span>{item.status === "running" && <small>进行中</small>}</summary>
+      <summary><strong>命令</strong><span title={program}>{program}</span>{item.status === "running" && <small>进行中</small>}</summary>
       <div className="activity-command-box"><strong>命令</strong><pre>{command || "暂无命令"}</pre></div>
       <div className="activity-command-box"><strong>输出</strong><pre>{typeof output === "string" ? output || "暂无输出" : output == null ? "暂无输出" : JSON.stringify(output, null, 2)}</pre></div>
     </details>;
@@ -44,8 +44,24 @@ function CommandDetails({ item }: { item: ActivityItem }) {
 
 function FileDetails({ item }: { item: ActivityItem }) {
   return <details className="activity-tool-details">
-    <summary><LinearIcon name="fileChange" /><strong>文件修改</strong>{item.status === "running" && <small>进行中</small>}</summary>
+    <summary><strong>文件修改</strong>{item.status === "running" && <small>进行中</small>}</summary>
     <p>{item.message ?? item.summary ?? item.detail ?? ""}</p>
+    {item.data && <pre>{JSON.stringify(item.data, null, 2)}</pre>}
+  </details>;
+}
+
+function isToolActivity(item: ActivityItem) {
+  return !["agentMessage", "userMessage"].includes(item.kind);
+}
+
+function ToolDetails({ item }: { item: ActivityItem }) {
+  if (item.kind === "commandExecution") return <CommandDetails item={item} />;
+  if (item.kind === "fileChange") return <FileDetails item={item} />;
+  const description = item.message ?? item.summary ?? item.detail ?? "";
+  const label = typeof item.data?.tool === "string" ? item.data.tool : "工具调用";
+  return <details className="activity-tool-details">
+    <summary><strong title={label}>{label}</strong><span title={description}>{description}</span>{item.status === "running" && <small>进行中</small>}</summary>
+    {description && <p>{description}</p>}
     {item.data && <pre>{JSON.stringify(item.data, null, 2)}</pre>}
   </details>;
 }
@@ -214,7 +230,11 @@ export function TaskDetail({
               <div className="activity-stream">
                 {current.lastError && <div className="activity-entry"><span className="activity-rail-icon"><LinearIcon name="alert" /></span><p><strong>执行错误</strong> {current.lastError}</p><time>{relativeTime(current.updatedAt)}</time></div>}
                 {current.lastMessage && !(current.activity ?? []).some(item => item.kind === "agentMessage" && item.message === current.lastMessage) && <div className="activity-entry activity-agent-message"><span className="activity-rail-icon">✦</span><p><strong>Codex</strong> {current.lastMessage}</p><time>{relativeTime(current.updatedAt)}</time></div>}
-                {[...(current.activity ?? [])].reverse().map((item, index) => <div className={`activity-entry${item.kind === "agentMessage" ? " activity-agent-message" : ""}${["commandExecution", "fileChange"].includes(item.kind) ? " activity-tool-entry" : ""}`} key={item.id ?? `${item.createdAt}-${index}`}><span className="activity-rail-icon">{item.kind === "agentMessage" ? "✦" : "↗"}</span><div className="activity-content">{item.kind === "commandExecution" ? <CommandDetails item={item} /> : item.kind === "fileChange" ? <FileDetails item={item} /> : <><p><strong>{activityLabel(item.kind)}</strong>{item.status === "running" && <small> · 进行中</small>}</p><p>{item.message ?? item.summary ?? item.detail ?? ""}</p>{item.data && !["agentMessage", "userMessage"].includes(item.kind ?? "") && <details><summary>查看调用详情</summary><pre>{JSON.stringify(item.data, null, 2)}</pre></details>}</>}</div><time>{relativeTime(item.createdAt)}</time></div>)}
+                {[...(current.activity ?? [])].reverse().map((item, index) => <div className={`activity-entry${item.kind === "agentMessage" ? " activity-agent-message" : ""}${isToolActivity(item) ? " activity-tool-entry" : ""}`} key={item.id ?? `${item.createdAt}-${index}`}>
+                  <span className="activity-rail-icon">{item.kind === "agentMessage" ? "✦" : isToolActivity(item) ? <LinearIcon name={item.kind === "fileChange" ? "fileChange" : "terminal"} /> : "↗"}</span>
+                  <div className="activity-content">{isToolActivity(item) ? <ToolDetails item={item} /> : <><p><strong>{activityLabel(item.kind)}</strong>{item.status === "running" && <small> · 进行中</small>}</p><p>{item.message ?? item.summary ?? item.detail ?? ""}</p></>}</div>
+                  <time>{relativeTime(item.createdAt)}</time>
+                </div>)}
                 {[...(current.runs ?? [])].reverse().map((run, index) => <div className="activity-entry" key={run.id ?? `run-${index}`}><span className="activity-rail-icon"><LinearIcon name="terminal" /></span><p><strong>TaskRun</strong> {run.lastOutputSummary ?? run.summary ?? run.phase ?? run.runState ?? run.state ?? "运行记录"}</p><time>{relativeTime(run.updatedAt ?? run.createdAt)}</time></div>)}
                 {current.lastError == null && current.lastMessage == null && (current.activity ?? []).length === 0 && (!current.runs || current.runs.length === 0) && <p className="activity-empty">Codex 开始工作后，最新进展会显示在这里。</p>}
               </div>
