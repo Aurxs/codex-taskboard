@@ -1,0 +1,23 @@
+/* The rail stays continuous; only the content to its right is interactive. */
+.app-shell .activity-entry.activity-tool-entry { min-height: 0; padding-block: 3px; }
+.activity-content .activity-tool-details { margin: 0; font-size: 13px; }
+.activity-content .activity-tool-details > summary { display: flex; align-items: center; gap: 8px; height: auto; min-height: 28px; color: var(--text-secondary); list-style: none; border-radius: 4px; }
+.activity-content .activity-tool-details > summary::before { content: none; }
+.activity-content .activity-tool-details > summary::-webkit-details-marker { display: none; }
+.activity-content .activity-tool-details > summary:hover,
+.activity-content .activity-tool-details > summary:focus-visible { color: var(--text-primary); }
+.activity-content .activity-tool-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.activity-content .activity-tool-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 24px; }
+.activity-read-path { text-decoration: underline dotted; text-underline-offset: 3px; }
+.activity-tool-chevron { flex: 0 0 12px; width: 12px; height: 12px; opacity: 0; transform: rotate(-90deg); }
+.activity-tool-details > summary:hover .activity-tool-chevron,
+.activity-tool-details > summary:focus-visible .activity-tool-chevron,
+.activity-tool-details[open] .activity-tool-chevron { opacity: 1; }
+.activity-tool-details[open] .activity-tool-chevron { transform: rotate(0); }
+.activity-tool-panel { box-sizing: border-box; max-height: min(280px, 40vh); overflow: auto; overscroll-behavior: contain; margin: 6px 0 9px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+.activity-tool-panel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.activity-detail-block + .activity-detail-block { margin-top: 12px; }
+.activity-detail-block > div, .activity-exit-code { color: var(--text-secondary); font-size: 12px; }
+.activity-content .activity-tool-panel pre { max-height: none; overflow: visible; padding: 0; margin: 6px 0 0; border: 0; background: transparent; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.55; }
+.activity-exit-code { margin-top: 10px; }
+@media (hover: none) { .activity-tool-chevron { opacity: 1; } }

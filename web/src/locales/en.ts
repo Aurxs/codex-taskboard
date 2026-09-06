@@ -1,5 +1,14 @@
 // Chinese source strings are stable message keys; placeholders are positional.
 export const en = {
+  "详情": "Details",
+  "退出码：{0}": "Exit code: {0}",
+  "参数": "Arguments",
+  "调用失败": "Call failed",
+  "已调用": "Called",
+  "浏览器调用": "Browser call",
+  "已修改": "Edited",
+  "已读取": "Read",
+  "已运行": "Ran",
   "执行位置": "Run in",
   "当前项目目录": "Current project directory",
   "新工作树": "New worktree",
