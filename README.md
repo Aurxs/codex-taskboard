@@ -15,15 +15,15 @@ Codex Taskboard is a local task board that runs inside Codex: organize requireme
 
 This is an independent community project with no affiliation with or endorsement by OpenAI.
 
-![Four-column task board](docs/images/project-ui.png)
+![Four-column task board](docs/images/project-ui-en.png)
 
-> The main image is a fresh capture of the four-column board in the current version. The other images show task creation and detail layouts. Example tasks and model options do not represent runtime data; available models depend on the response from Codex on your machine.
+> All screenshots show the English interface built from the current source, using isolated demo tasks. Available models depend on the response from Codex on your machine.
 
 ## Highlights
 
 | Feature | How it works |
 | --- | --- |
-| Four-column board | Waiting to be claimed → In progress → Awaiting your review → Done; canceled tasks are available separately |
+| Four-column board | Todo → In progress → In review → Done; canceled tasks are available separately |
 | Task dependencies | Set prerequisite tasks; a task enters the execution flow after its blockers are cleared |
 | Project scheduling | At most one task runs per project; different projects can run in parallel |
 | Automation toggles | Auto-claim is off by default, and human review is on by default |
@@ -35,17 +35,17 @@ This is an independent community project with no affiliation with or endorsement
 
 Enter a title, Markdown description, priority, and acceptance criteria. Choose a model and reasoning effort when needed; the choices take effect on the next execution.
 
-Attach PNG, JPEG, GIF, WebP images or Markdown documents when creating a task (up to 10 files, 10 MB each, 20 MB total). Files are saved with the task, downloadable from its details, and provided to Codex through local paths during execution.
+Attach PNG, JPEG, GIF, WebP images, Markdown, plain text, PDF, or Office documents (up to 10 files, 10 MB each, 20 MB total). Files are saved with the task and provided to Codex through local paths during execution. Preview images and text in the details; open PDF and Office documents in their default external applications.
 
 Choose the Draft priority to save unfinished ideas in Todo without automatic or manual execution. Change to another priority to publish; pause running tasks before turning them into drafts.
 
-![Task creation and execution options](docs/images/task-controls.png)
+![Task creation and execution options](docs/images/task-controls-en.png)
 
 ### Set dependencies to make execution order clear
 
 Select prerequisite tasks under “Blocked by” to split work that must happen in sequence.
 
-![Selecting prerequisite tasks](docs/images/dependency-open.png)
+![Selecting prerequisite tasks](docs/images/dependency-open-en.png)
 
 ### View status and execution history in the details
 
@@ -55,7 +55,13 @@ Running, review, and completed tasks have a pinned follow-up composer in the lef
 
 Normal development and packaged launches share the desktop's existing App Server without synthetic native notifications or changes to its composer. Live events are backed by a latest-turn check every five seconds. Pause interrupts the turn and returns the task to draft priority, preventing automatic re-claim. Restart the launcher after upgrading to load these changes. Backend-only / no-injector diagnostic modes retain an isolated stdio server and do not provide native bidirectional sync.
 
-![Task details](docs/images/task-detail.png)
+![Task details](docs/images/task-detail-en.png)
+
+## Language
+
+Taskboard follows Codex’s display language automatically: Simplified Chinese uses Chinese; every other language, including Traditional Chinese, uses English. The board, sidebar entry, and menu bar launcher update when Codex’s language changes. The launcher uses English until Codex reports its language.
+
+Task titles, descriptions, attachments, and conversation content stay in their original language. Switching the interface language preserves open forms and follow-up drafts. Task execution prompts ask Codex to respond in the task author’s language.
 
 ## Requirements
 
@@ -91,6 +97,10 @@ python3 scripts/dev.py
 ```
 
 This command starts Vite and a shared sidecar containing FastAPI and the CDP injector. Taskboard has no standalone work window: the launcher adds a “Taskboard” entry to the Codex sidebar, and clicking it shows the board in Codex’s main content area. The embedded iframe points to Vite `5173`, while `/api` is proxied to FastAPI `47823`. The sidecar uses the desktop's existing App Server through its message bridge. The development database is `.data/` in the repository.
+
+UI translations live in `web/src/locales/en.ts`, keyed by the Chinese source text. Add interface messages through `t()` in `web/src/i18n.ts`; keep stored task values and user content independent of the display language.
+
+After `npm run build`, run `node scripts/check_i18n.mjs` with an installed Playwright module (or set `PLAYWRIGHT_MODULE` to its path). The script mocks every request, verifies language switching and English fallback, and writes the four English README captures to `output/playwright/i18n/`. Copy the reviewed images to `docs/images/` to update this page.
 
 Common options:
 

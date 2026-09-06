@@ -1,3 +1,4 @@
+import { t, getLocale, localizeError } from "./i18n";
 import type {
   ApiErrorShape,
   AttachmentInput,
@@ -18,7 +19,7 @@ export class ApiError extends Error {
 
   constructor(status: number, body: ApiErrorShape | null, fallback?: string) {
     const normalized = normalizeApiErrorBody(body);
-    super(normalized?.message ?? fallback ?? `请求失败 (${status})`);
+    super(localizeError(normalized?.message ?? fallback ?? t("请求失败 ({0})", status)));
     this.name = "ApiError";
     this.status = status;
     this.code = normalized?.code;
@@ -141,7 +142,7 @@ function normalizeProject(value: unknown): Project {
   return {
     id: String(item.id ?? ""),
     key: String(item.key ?? ""),
-    name: String(item.name ?? item.key ?? "未命名项目"),
+    name: String(item.name ?? item.key ?? t("未命名项目")),
     workspacePath: String(item.workspacePath ?? item.path ?? ""),
     codexProjectId: item.codexProjectId == null ? null : String(item.codexProjectId),
     automationEnabled: Boolean(item.automationEnabled ?? false),
@@ -158,6 +159,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       Accept: "application/json",
+      "Accept-Language": getLocale(),
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
@@ -304,7 +306,7 @@ export async function listCodexProjects(): Promise<Array<{
     const normalized = camelize(item) as Record<string, unknown>;
     return {
       id: normalized.id == null ? undefined : String(normalized.id),
-      name: String(normalized.name ?? normalized.key ?? "未命名项目"),
+      name: String(normalized.name ?? normalized.key ?? t("未命名项目")),
       workspacePath: String(normalized.workspacePath ?? normalized.path ?? ""),
     };
   });

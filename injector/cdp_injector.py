@@ -1004,6 +1004,12 @@ class CdpInjector:
         try:
             if action == "ensure":
                 response.update(ok=True, managed=True, restarted=False)
+            elif action == "language":
+                language = payload.get("language")
+                if not isinstance(language, str) or len(language) > 64:
+                    raise InjectorError("Invalid host language")
+                self._emit("language", language=language)
+                response["ok"] = True
             elif action == "load-frame":
                 response.update(self._load_frame(connection, str(payload.get("frameName") or ""), str(payload.get("frameCapability") or "")))
                 response["ok"] = True

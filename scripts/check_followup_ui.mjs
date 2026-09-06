@@ -40,7 +40,7 @@ try {
       window.messages.push(e.data);
       if (e.data.type === 'taskboard:frame-awaiting-challenge') e.source.postMessage({ type: 'taskboard:frame-challenge', payload: { challenge: 'fixture' } }, '*');
     });
-    setInterval(() => document.querySelector('iframe').contentWindow.postMessage({ type: 'taskboard:host-context', payload: { projectId: project.codexProjectId, projects: [{ id: project.codexProjectId, name: project.name, workspacePath: project.workspacePath, projectKind: 'local' }] } }, '*'), 100);
+    setInterval(() => document.querySelector('iframe').contentWindow.postMessage({ type: 'taskboard:host-context', payload: { language: 'zh-CN', projectId: project.codexProjectId, projects: [{ id: project.codexProjectId, name: project.name, workspacePath: project.workspacePath, projectKind: 'local' }] } }, '*'), 100);
   }, project);
   const cdp = await page.context().newCDPSession(page);
   const tree = await cdp.send('Page.getFrameTree');

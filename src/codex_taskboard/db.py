@@ -768,7 +768,7 @@ class Database:
     def attachment_prompt(self, task_id: str) -> str:
         task = self.get_task(task_id)
         paths = [str(self.attachment_path(item["id"])) for item in task["attachments"]]
-        return "\n\n任务附件（请读取文档或查看图片）：\n" + "\n".join(paths) if paths else ""
+        return "\n\nTask attachments (read the documents or view the images):\n" + "\n".join(paths) if paths else ""
 
     def update_task(
         self,

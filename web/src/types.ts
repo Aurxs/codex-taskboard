@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 export const TASK_STATUSES = ["todo", "in_progress", "in_review", "done"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type AnyTaskStatus = TaskStatus | "canceled";
@@ -178,28 +179,28 @@ export interface HostContext {
 }
 
 export const PRIORITY_LABELS: Record<TaskPriority, string> = {
-  urgent: "紧急",
-  high: "高",
-  medium: "中",
-  low: "低",
-  none: "无优先级",
-  draft: "草稿",
+  get urgent() { return t("紧急"); },
+  get high() { return t("高"); },
+  get medium() { return t("中"); },
+  get low() { return t("低"); },
+  get none() { return t("无优先级"); },
+  get draft() { return t("草稿"); },
 };
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
-  todo: "待认领",
-  in_progress: "处理中",
-  in_review: "等你确认",
-  done: "已完成",
+  get todo() { return t("待认领"); },
+  get in_progress() { return t("处理中"); },
+  get in_review() { return t("等你确认"); },
+  get done() { return t("已完成"); },
 };
 
 export const RUN_STATE_LABELS: Record<TaskRunState, string> = {
-  starting: "启动中",
-  running: "执行中",
-  waiting_quota: "等待额度",
-  waiting_approval: "等待批准",
-  waiting_input: "等待回答",
-  failed: "执行失败",
+  get starting() { return t("启动中"); },
+  get running() { return t("执行中"); },
+  get waiting_quota() { return t("等待额度"); },
+  get waiting_approval() { return t("等待批准"); },
+  get waiting_input() { return t("等待回答"); },
+  get failed() { return t("执行失败"); },
 };
 
 export const RUN_STATE_TONES: Record<TaskRunState, string> = {

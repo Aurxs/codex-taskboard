@@ -1,3 +1,4 @@
+import { t, localizeError } from "../i18n";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { openAttachment, previewAttachment } from "../api";
 import type { TaskAttachment } from "../types";
@@ -32,25 +33,25 @@ export function AttachmentPreview({ file, onClose }: { file: TaskAttachment; onC
     dialog.current?.showModal();
     let active = true;
     previewAttachment(file.id).then(value => { if (active) setPreview(value); })
-      .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "附件读取失败"); });
+      .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : t("附件读取失败")); });
     return () => { active = false; };
   }, [file.id]);
   async function open() {
     setBusy(true);
     setError("");
     try { await openAttachment(file.id); onClose(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "附件打开失败"); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : t("附件打开失败")); }
     finally { setBusy(false); }
   }
   return <dialog ref={dialog} className="attachment-preview" aria-labelledby="attachment-preview-title" onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <header><h2 id="attachment-preview-title">{file.name}</h2><button type="button" className="quiet-button" aria-label="关闭附件预览" onClick={onClose}>×</button></header>
+    <header><h2 id="attachment-preview-title">{file.name}</h2><button type="button" className="quiet-button" aria-label={t("关闭附件预览")} onClick={onClose}>×</button></header>
     <div className="attachment-preview-content">
-      {!preview && !error && <p role="status">正在读取本地附件…</p>}
-      {error && <p role="alert" className="form-error">{error}</p>}
-      {preview?.kind === "image" && <img src={preview.content} alt={file.name} onError={() => setError("图片无法解码，附件可能已损坏。")} />}
+      {!preview && !error && <p role="status">{t("正在读取本地附件…")}</p>}
+      {error && <p role="alert" className="form-error">{localizeError(error)}</p>}
+      {preview?.kind === "image" && <img src={preview.content} alt={file.name} onError={() => setError(t("图片无法解码，附件可能已损坏。"))} />}
       {preview?.kind === "markdown" && <Markdown text={preview.content} />}
       {preview?.kind === "text" && <pre>{preview.content}</pre>}
-      {preview?.kind === "external" && <><p>此文件将在系统默认的外部应用中打开，是否继续？</p><p className="attachment-local-path">{preview.content}</p><div className="attachment-preview-actions"><button type="button" className="secondary-button" onClick={onClose}>取消</button><button type="button" className="primary-button" disabled={busy} onClick={() => void open()}>{busy ? "正在打开…" : "在外部应用中打开"}</button></div></>}
+      {preview?.kind === "external" && <><p>{t("此文件将在系统默认的外部应用中打开，是否继续？")}</p><p className="attachment-local-path">{preview.content}</p><div className="attachment-preview-actions"><button type="button" className="secondary-button" onClick={onClose}>{t("取消")}</button><button type="button" className="primary-button" disabled={busy} onClick={() => void open()}>{busy ? t("正在打开…") : t("在外部应用中打开")}</button></div></>}
     </div>
   </dialog>;
 }

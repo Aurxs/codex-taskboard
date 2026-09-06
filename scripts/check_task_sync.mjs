@@ -44,7 +44,7 @@ try {
   });
   await page.goto('http://127.0.0.1:47825/');
   await page.evaluate(projects => {
-    window.context = { projects: projects.map(p => ({ id: p.codexProjectId, name: p.name, workspacePath: p.workspacePath, projectKind: 'local' })), projectId: projects[0].codexProjectId };
+    window.context = { language: 'zh-CN', projects: projects.map(p => ({ id: p.codexProjectId, name: p.name, workspacePath: p.workspacePath, projectKind: 'local' })), projectId: projects[0].codexProjectId };
     addEventListener('message', e => {
       if (e.data.type === 'taskboard:frame-awaiting-challenge') e.source.postMessage({ type: 'taskboard:frame-challenge', payload: { challenge: 'test' } }, '*');
     });

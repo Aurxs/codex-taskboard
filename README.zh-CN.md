@@ -57,6 +57,12 @@ Codex Taskboard 是一个运行在 Codex 内部的本地任务看板：整理需
 
 ![任务详情](docs/images/task-detail.png)
 
+## 界面语言
+
+Taskboard 自动跟随 Codex 的显示语言：简体中文显示中文，其余语言（包括繁体中文）统一显示英文。看板、侧栏入口和菜单栏启动器会随 Codex 的语言变化更新；启动器尚未收到 Codex 语言信息时默认使用英文。
+
+语言切换会保留正在填写的表单和跟进草稿，不会翻译任务标题、描述、附件或会话内容。任务执行提示词会要求 Codex 使用任务作者的语言回复。
+
 ## 系统要求
 
 - macOS 14 或更高版本，Apple Silicon（arm64）；当前不提供 Windows、Linux 或 Intel Mac 支持。

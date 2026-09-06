@@ -314,16 +314,21 @@ def create_app(
         }
 
     @app.post("/api/system/pick-directory")
-    async def pick_directory() -> dict[str, str]:
+    async def pick_directory(request: Request) -> dict[str, str]:
         if sys.platform != "darwin":
             raise UnsupportedError("Directory picker is only available on macOS")
+        prompt = (
+            "选择 Codex 项目目录"
+            if request.headers.get("accept-language") == "zh-CN"
+            else "Choose a Codex project directory"
+        )
         try:
             result = await asyncio.to_thread(
                 subprocess.run,
                 [
                     "/usr/bin/osascript",
                     "-e",
-                    "POSIX path of (choose folder with prompt \"选择 Codex 项目目录\")",
+                    f'POSIX path of (choose folder with prompt "{prompt}")',
                 ],
                 check=False,
                 capture_output=True,

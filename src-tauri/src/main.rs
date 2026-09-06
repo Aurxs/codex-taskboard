@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod i18n;
+use i18n::text;
+
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -32,6 +35,8 @@ struct SidecarState {
     log_file: Mutex<File>,
     generation: AtomicU64,
     status_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    status: Mutex<ServiceStatus>,
+    localized_items: Mutex<Vec<(MenuItem<tauri::Wry>, &'static str, &'static str)>>,
 }
 
 #[derive(Clone, Copy)]
@@ -45,10 +50,10 @@ enum ServiceStatus {
 impl ServiceStatus {
     fn label(self) -> &'static str {
         match self {
-            Self::Starting => "启动中",
-            Self::Running => "已运行",
-            Self::Failed => "失败",
-            Self::Stopped => "已停止",
+            Self::Starting => text("启动中", "Starting"),
+            Self::Running => text("已运行", "Running"),
+            Self::Failed => text("失败", "Failed"),
+            Self::Stopped => text("已停止", "Stopped"),
         }
     }
 }
@@ -99,9 +104,10 @@ fn data_directory(app: &AppHandle) -> PathBuf {
 }
 
 fn set_status(app: &AppHandle, state: &Arc<SidecarState>, status: ServiceStatus, message: &str) {
+    *state.status.lock().unwrap() = status;
     if let Ok(status_item) = state.status_item.lock() {
         if let Some(status_item) = status_item.clone() {
-            let label = format!("状态：{}", status.label());
+            let label = format!("{}{}", text("状态：", "Status: "), status.label());
             let _ = app.run_on_main_thread(move || {
                 let _ = status_item.set_text(label);
             });
@@ -138,26 +144,26 @@ fn status_from_sidecar_event(value: &serde_json::Value) -> Option<(ServiceStatus
     match event {
         "backend_ready" => Some((
             ServiceStatus::Starting,
-            message.unwrap_or_else(|| "任务面板后端已就绪，正在连接 Codex…".to_string()),
+            message.unwrap_or_else(|| text("任务面板后端已就绪，正在连接 Codex…", "Taskboard backend is ready. Connecting to Codex…").to_string()),
         )),
         "codex_launched" => Some((
             ServiceStatus::Starting,
-            message.unwrap_or_else(|| "Codex 已启动，正在注入任务面板…".to_string()),
+            message.unwrap_or_else(|| text("Codex 已启动，正在注入任务面板…", "Codex started. Loading Taskboard…").to_string()),
         )),
         "injected" => Some((
             ServiceStatus::Running,
-            message.unwrap_or_else(|| "任务面板已注入 Codex".to_string()),
+            message.unwrap_or_else(|| text("任务面板已注入 Codex", "Taskboard is available in Codex").to_string()),
         )),
         "error" => Some((
             ServiceStatus::Failed,
-            message.unwrap_or_else(|| "任务面板服务发生错误".to_string()),
+            message.unwrap_or_else(|| text("任务面板服务发生错误", "Taskboard service encountered an error").to_string()),
         )),
         "terminated" => {
             let code = value.get("code").and_then(serde_json::Value::as_i64);
             if code == Some(0) {
-                Some((ServiceStatus::Stopped, "任务面板服务已停止".to_string()))
+                Some((ServiceStatus::Stopped, text("任务面板服务已停止", "Taskboard service stopped").to_string()))
             } else {
-                Some((ServiceStatus::Failed, "任务面板服务异常退出".to_string()))
+                Some((ServiceStatus::Failed, text("任务面板服务异常退出", "Taskboard service exited unexpectedly").to_string()))
             }
         }
         _ => None,
@@ -182,6 +188,21 @@ fn consume_sidecar_line(
         );
         return;
     };
+    if value.get("event").and_then(|event| event.as_str()) == Some("language")
+        && state.generation.load(Ordering::SeqCst) == generation
+    {
+        if let Some(language) = value.get("language").and_then(|language| language.as_str()) {
+            i18n::set_language(language);
+            let items = state.localized_items.lock().unwrap().clone();
+            let _ = app.run_on_main_thread(move || {
+                for (item, chinese, english) in items {
+                    let _ = item.set_text(text(chinese, english));
+                }
+            });
+            let status = *state.status.lock().unwrap();
+            set_status(app, state, status, "");
+        }
+    }
     if let Some((status, message)) = status_from_sidecar_event(&value) {
         set_status_for_generation(app, state, generation, status, &message);
     }
@@ -276,14 +297,14 @@ fn has_cdp_arguments(command: &str) -> bool {
 fn ordinary_codex_process(app_path: &Path) -> Result<Option<u32>, String> {
     let app_name = app_path
         .file_stem()
-        .ok_or_else(|| "无法识别 Codex App 名称".to_string())?;
+        .ok_or_else(|| text("无法识别 Codex App 名称", "Cannot identify the Codex app name").to_string())?;
     let executable = app_path.join("Contents/MacOS").join(app_name);
     let output = StdCommand::new("/bin/ps")
         .args(["-ww", "-axo", "pid=,command="])
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
-        return Err("无法检查正在运行的 Codex".to_string());
+        return Err(text("无法检查正在运行的 Codex", "Cannot check the running Codex app").to_string());
     }
 
     let executable = executable.to_string_lossy();
@@ -316,15 +337,21 @@ fn confirm_codex_restart(app_path: &Path) -> bool {
         .file_stem()
         .and_then(|name| name.to_str())
         .unwrap_or("Codex");
+    let cancel = text("取消", "Cancel");
+    let restart = text("重新启动 Codex", "Restart Codex");
+    let message = text(
+        "需要重新启动 {app} 才能在 Codex 中显示任务面板。",
+        "Restart {app} to show Taskboard in Codex.",
+    ).replace("{app}", app_name);
     let script = format!(
-        "display dialog \"需要重新启动 {app_name} 才能在 Codex 中显示任务面板。\" buttons {{\"取消\", \"重新启动 Codex\"}} default button \"重新启动 Codex\" with title \"Codex Taskboard\""
+        "display dialog \"{message}\" buttons {{\"{cancel}\", \"{restart}\"}} default button \"{restart}\" with title \"Codex Taskboard\""
     );
     StdCommand::new("/usr/bin/osascript")
         .args(["-e", &script])
         .output()
         .map(|output| {
             output.status.success()
-                && String::from_utf8_lossy(&output.stdout).contains("重新启动 Codex")
+                && String::from_utf8_lossy(&output.stdout).contains(restart)
         })
         .unwrap_or(false)
 }
@@ -341,14 +368,14 @@ fn quit_codex_normally(app_path: &Path, pid: u32) -> Result<(), String> {
         .output()
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
-        return Err("Codex 没有接受退出请求".to_string());
+        return Err(text("Codex 没有接受退出请求", "Codex did not accept the quit request").to_string());
     }
     let deadline = Instant::now() + Duration::from_secs(36);
     while process_is_running(pid) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(100));
     }
     if process_is_running(pid) {
-        return Err("Codex 尚未退出，任务面板没有启动".to_string());
+        return Err(text("Codex 尚未退出，任务面板没有启动", "Codex has not exited. Taskboard was not started").to_string());
     }
     Ok(())
 }
@@ -384,7 +411,7 @@ fn start_sidecar(app: &AppHandle, state: &Arc<SidecarState>) -> Result<(), Strin
     }
 
     if !prepare_codex_for_injection()? {
-        set_status(app, state, ServiceStatus::Stopped, "已取消重新启动 Codex，未注入任务面板");
+        set_status(app, state, ServiceStatus::Stopped, text("已取消重新启动 Codex，未注入任务面板", "Codex restart canceled. Taskboard was not loaded"));
         return Ok(());
     }
 
@@ -394,7 +421,7 @@ fn start_sidecar(app: &AppHandle, state: &Arc<SidecarState>) -> Result<(), Strin
         app,
         state,
         ServiceStatus::Starting,
-        "正在启动任务面板服务…",
+        text("正在启动任务面板服务…", "Starting Taskboard service…"),
     );
 
     let command = app
@@ -519,6 +546,8 @@ fn main() {
                 log_file: Mutex::new(log_file),
                 generation: AtomicU64::new(0),
                 status_item: Mutex::new(None),
+                status: Mutex::new(ServiceStatus::Starting),
+                localized_items: Mutex::new(Vec::new()),
             });
             append_log(&state, "lifecycle", "menu-bar launcher started");
             app.manage(Arc::clone(&state));
@@ -533,7 +562,7 @@ fn main() {
             let status_item = MenuItem::with_id(
                 app,
                 "service-status",
-                "状态：启动中",
+                text("状态：启动中", "Status: Starting"),
                 false,
                 None::<&str>,
             )?;
@@ -541,25 +570,31 @@ fn main() {
             let open_taskboard = MenuItem::with_id(
                 app,
                 "open-taskboard",
-                "在 Codex 中打开任务面板",
+                text("在 Codex 中打开任务面板", "Open Taskboard in Codex"),
                 true,
                 None::<&str>,
             )?;
             let restart_service = MenuItem::with_id(
                 app,
                 "restart-service",
-                "重新启动服务",
+                text("重新启动服务", "Restart service"),
                 true,
                 None::<&str>,
             )?;
             let log_item = MenuItem::with_id(
                 app,
                 "view-log",
-                "查看启动日志",
+                text("查看启动日志", "View startup log"),
                 true,
                 None::<&str>,
             )?;
-            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", text("退出", "Quit"), true, None::<&str>)?;
+            *state.localized_items.lock().unwrap() = vec![
+                (open_taskboard.clone(), "在 Codex 中打开任务面板", "Open Taskboard in Codex"),
+                (restart_service.clone(), "重新启动服务", "Restart service"),
+                (log_item.clone(), "查看启动日志", "View startup log"),
+                (quit.clone(), "退出", "Quit"),
+            ];
             let menu = Menu::with_items(
                 app,
                 &[

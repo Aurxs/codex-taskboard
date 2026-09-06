@@ -1,13 +1,14 @@
+import { t } from "../i18n";
 import { useEffect, useState, type DragEvent } from "react";
 import type { Task, TaskStatus } from "../types";
 import { PlusIcon, StatusIcon } from "./SemanticIcons";
 import { TaskCard } from "./TaskCard";
 
 export const STATUS_DETAILS: Record<TaskStatus, { label: string; tone: string }> = {
-  todo: { label: "等待认领", tone: "todo" },
-  in_progress: { label: "处理中", tone: "progress" },
-  in_review: { label: "等你确认", tone: "review" },
-  done: { label: "完成", tone: "done" },
+  todo: { get label() { return t("等待认领"); }, tone: "todo" },
+  in_progress: { get label() { return t("处理中"); }, tone: "progress" },
+  in_review: { get label() { return t("等你确认"); }, tone: "review" },
+  done: { get label() { return t("已完成"); }, tone: "done" },
 };
 
 export function BoardColumn({
@@ -78,12 +79,12 @@ export function BoardColumn({
           <h2 id={`column-${status}`}>{details.label}{tasks.length > 0 ? ` ${tasks.length}` : ""}</h2>
         </div>
         <div className="column-actions">
-          <button type="button" className="icon-button add-task-button" onClick={() => onCreate(status)} aria-label={`在${details.label}中新建任务`} title={`添加到${details.label}`}><PlusIcon color="var(--column-status-color)" size={12} /></button>
+          <button type="button" className="icon-button add-task-button" onClick={() => onCreate(status)} aria-label={t("在{0}中新建任务", details.label)} title={t("添加到{0}", details.label)}><PlusIcon color="var(--column-status-color)" size={12} /></button>
         </div>
       </header>
       <div className="column-list">
         {tasks.map((task) => <TaskCard key={task.id} task={task} isDragging={draggedTaskId === task.id} onEdit={onEdit} onComplete={onComplete} onDragStart={onDragStart} onDragEnd={onDragEnd} />)}
-        {tasks.length === 0 && <div className="column-empty">{status === "todo" ? "暂无待认领任务" : status === "in_progress" ? "暂无处理中任务" : status === "in_review" ? "暂无待确认任务" : "完成的任务会出现在这里"}</div>}
+        {tasks.length === 0 && <div className="column-empty">{status === "todo" ? t("暂无待认领任务") : status === "in_progress" ? t("暂无处理中任务") : status === "in_review" ? t("暂无待确认任务") : t("完成的任务会出现在这里")}</div>}
         {isDropTarget && dropBeforeTaskId && remainingTasks.length === 0 && null}
       </div>
     </section>

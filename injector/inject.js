@@ -84,7 +84,7 @@
 
   function resolvedHostLanguage() {
     const language = hostLanguage().trim().replaceAll("_", "-").toLowerCase();
-    return language === "zh" || language.startsWith("zh-") ? "zh" : "en";
+    return /^zh(?:-(?:hans(?:-[a-z]{2})?|cn|sg))?$/.test(language) ? "zh" : "en";
   }
 
   function hostText(chinese, english) {
@@ -498,8 +498,16 @@
     if (frameChallenge) postToFrame({ type: "taskboard:frame-challenge", payload: { challenge: frameChallenge } }, true);
   }
 
+  let reportedLanguage = null;
   function postHostContext() {
+    const language = hostLanguage();
+    if (HOST_CAPABILITY && language !== reportedLanguage) {
+      reportedLanguage = language;
+      void requestHost("language", { language }).catch(() => { reportedLanguage = null; });
+    }
     if (!frame) return;
+    frame.title = hostText("任务面板", "Taskboard");
+    if (page) page.setAttribute("aria-label", hostText("任务面板", "Taskboard"));
     const liveContext = { language: hostLanguage(), theme: currentTheme(), projects: readCodexProjects(), ...(lastNativeProjectId ? { projectId: lastNativeProjectId } : {}) };
     const payload = hostContextSnapshot
       ? { ...hostContextSnapshot, ...liveContext, projects: liveContext.projects.length ? liveContext.projects : hostContextSnapshot.projects }
@@ -865,7 +873,7 @@
     if (destroyed || observer || !document.documentElement) return;
     ensureEntry();
     observer = new MutationObserver(scheduleRefresh);
-    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "data-theme", "data-color-theme", "data-app-action-sidebar-thread-active", "aria-label", "aria-current"] });
+    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["lang", "class", "data-theme", "data-color-theme", "data-app-action-sidebar-thread-active", "aria-label", "aria-current"] });
     hostContextTimer = window.setInterval(postHostContext, 1_000);
     document.addEventListener("click", onDocumentClick, true);
     window.addEventListener("message", onFrameMessage);

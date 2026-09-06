@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import unittest
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 try:
     import httpx
@@ -212,6 +212,18 @@ class HttpContractTests(unittest.IsolatedAsyncioTestCase):
             json={"action": "cancel", "version": canceled.json()["version"]},
         )
         self.assertEqual(cancel_canceled.status_code, 422)
+
+    async def test_directory_picker_uses_interface_language(self) -> None:
+        result = Mock(returncode=0, stdout="/tmp/demo\n", stderr="")
+        for locale, expected in [("zh-CN", "选择 Codex 项目目录"), ("en", "Choose a Codex project directory")]:
+            with patch("codex_taskboard.app.sys.platform", "darwin"), patch(
+                "codex_taskboard.app.subprocess.run", return_value=result
+            ) as run:
+                response = await self.client.post(
+                    "/api/system/pick-directory", headers={"Accept-Language": locale}
+                )
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(expected, run.call_args.args[0][-1])
 
     async def test_directory_picker_is_explicitly_unsupported_off_macos(self) -> None:
         with patch("codex_taskboard.app.sys.platform", "linux"):

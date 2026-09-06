@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import completeIcon from "../assets/figma-taskboard/card-complete.svg";
 import processingAnimation from "../assets/figma-taskboard/loading-16.svg";
 import type { Task } from "../types";
@@ -41,16 +42,16 @@ export function TaskCard({
   const processing = task.status === "in_progress";
   const excerpt = markdownExcerpt(task.description);
   const processingLabel = task.runState === "waiting_quota"
-    ? "等待额度"
+    ? t("等待额度")
     : task.runState === "waiting_approval"
-      ? "等待批准"
+      ? t("等待批准")
       : task.runState === "waiting_input"
-        ? "等待回答"
+        ? t("等待回答")
         : task.runState === "failed"
-          ? "执行失败"
+          ? t("执行失败")
           : task.runState === "starting"
-            ? "启动中"
-            : "执行中";
+            ? t("启动中")
+            : t("执行中");
   return (
     <article
       className={`task-card task-card-main status-${task.status}${processing ? " is-processing-card" : ""}${processing && task.runState === "running" ? " is-running-card" : ""}${isDragging ? " is-dragging" : ""}${pendingInteraction ? " is-unread" : ""}`}
@@ -65,24 +66,24 @@ export function TaskCard({
       }}
       onDragEnd={onDragEnd}
     >
-      <button className="task-card-open" type="button" aria-label={`打开 ${task.identifier}: ${task.title}`} onClick={() => onEdit(task)} />
+      <button className="task-card-open" type="button" aria-label={t("打开 {0}: {1}", task.identifier, task.title)} onClick={() => onEdit(task)} />
       <div className="card-topline">
         <span className="card-reference"><span className="task-identifier">ID: {task.identifier}</span></span>
-        {pendingInteraction && <span className="task-unread-dot" aria-label="有待处理交互" />}
-        {task.status === "in_review" && <button className="task-card-complete" type="button" onClick={(event) => { event.stopPropagation(); onComplete(task); }}><img src={completeIcon} alt="" /><span>完成</span></button>}
+        {pendingInteraction && <span className="task-unread-dot" aria-label={t("有待处理交互")} />}
+        {task.status === "in_review" && <button className="task-card-complete" type="button" onClick={(event) => { event.stopPropagation(); onComplete(task); }}><img src={completeIcon} alt="" /><span>{t("完成")}</span></button>}
       </div>
       <h3 id={`task-${task.id}-title`}>{task.title}</h3>
       {excerpt && <p className="task-card-description">{excerpt}</p>}
-      <div className="card-properties" aria-label="任务属性">
-        <span className={`property-control priority-chip priority-chip-${task.priority}`} title={`优先级：${PRIORITY_LABELS[task.priority]}`}>
+      <div className="card-properties" aria-label={t("任务属性")}>
+        <span className={`property-control priority-chip priority-chip-${task.priority}`} title={t("优先级：{0}", PRIORITY_LABELS[task.priority])}>
           <PriorityIcon priority={task.priority} size={13} />
           <span>{PRIORITY_LABELS[task.priority]}</span>
         </span>
-        {blocked && <span className="property-control task-blocked-chip" title={`阻塞于 ${task.blockedBy.map((item) => item.identifier).join(", ") || "未完成前置任务"}`}><span aria-hidden="true">⌑</span><span>阻塞中</span></span>}
-        {task.threadId && <span className="task-thread-chip" title="已关联 Codex thread">⌁</span>}
+        {blocked && <span className="property-control task-blocked-chip" title={t("阻塞于 {0}", task.blockedBy.map((item) => item.identifier).join(", ") || t("未完成前置任务"))}><span aria-hidden="true">⌑</span><span>{t("阻塞中")}</span></span>}
+        {task.threadId && <span className="task-thread-chip" title={t("已关联 Codex thread")}>⌁</span>}
       </div>
-      {task.blockedBy.length > 0 && <div className="task-card-dependencies"><span className="task-card-dependency-lock" aria-hidden="true">⌑</span><span>阻塞于 {task.blockedBy.map((item) => item.identifier).join(", ")}</span></div>}
-      {task.model && <div className="task-card-execution" title="在任务详情中修改模型与推理强度">{task.model}{task.reasoningEffort ? ` · ${task.reasoningEffort}` : ""}</div>}
+      {task.blockedBy.length > 0 && <div className="task-card-dependencies"><span className="task-card-dependency-lock" aria-hidden="true">⌑</span><span>{t("阻塞于")} {task.blockedBy.map((item) => item.identifier).join(", ")}</span></div>}
+      {task.model && <div className="task-card-execution" title={t("在任务详情中修改模型与推理强度")}>{task.model}{task.reasoningEffort ? ` · ${task.reasoningEffort}` : ""}</div>}
       {processing && (
         <div className={`task-processing-row${task.runState === "running" ? " is-running" : " is-paused"}`}>
           {task.runState === "running" && <img className="task-processing-glyph" src={processingAnimation} alt="" aria-hidden="true" />}

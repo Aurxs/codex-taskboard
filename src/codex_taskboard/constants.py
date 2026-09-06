@@ -43,21 +43,34 @@ PRIORITY_RANK = {
     Priority.DRAFT.value: 5,
 }
 
+# Keep orchestration text in English and explicitly preserve the task author's
+# language, so the wrapper does not force Chinese replies for English tasks.
 INITIAL_TURN_TEMPLATE = (
-    "你正在执行任务「{identifier}: {title}」。\n\n"
+    'You are working on task "{identifier}: {title}".\n\n'
     "{description}\n\n"
-    "请在当前项目目录中完成该任务，遵循 Codex 已加载的全部项目指令与安全设置。"
-    "持续工作到任务完成，并进行与改动相称的验证。完成任务前，必须提交本次任务产生的改动。"
-    "最终回复请说明完成内容、"
-    "验证结果，以及未完成项或需要人工决定的问题。不要操作 Taskboard；任务状态由调度器管理。"
+    "Complete this task in the current project directory, following all project instructions "
+    "and safety settings already loaded by Codex. Continue until the task is complete and "
+    "perform verification proportionate to the changes. Before completing the task, "
+    "you must commit the changes produced by this task. "
+    "In your final response, describe what was completed, verification results, and any "
+    "unfinished work or questions requiring a human decision. Use the language of the task "
+    "title and description unless the user requests otherwise. "
+    "Do not operate Taskboard; the scheduler manages task status."
 )
 
-QUOTA_RESUME_PROMPT = "刚才的执行因使用额度中断。请从当前 thread 的已有上下文继续，完成剩余工作和验证。"
+QUOTA_RESUME_PROMPT = (
+    "Execution was interrupted by usage limits. Continue from this thread's existing "
+    "context and complete the remaining work and verification. Keep using the user's language."
+)
 
-FAILED_RETRY_PROMPT = "请从当前 thread 的已有上下文继续，重试尚未完成的工作，完成任务并进行与改动相称的验证。"
+FAILED_RETRY_PROMPT = (
+    "Continue from this thread's existing context, retry the unfinished work, complete "
+    "the task, and verify the changes proportionately. Keep using the user's language."
+)
 
 REVIEW_FEEDBACK_TEMPLATE = (
-    "审阅未通过。用户反馈如下：\n{feedback}\n请继续修改并验证。"
+    "Changes were requested during review. User feedback:\n{feedback}\n"
+    "Continue editing and verifying. Keep using the user's language."
 )
 
 APPROVAL_METHODS = {

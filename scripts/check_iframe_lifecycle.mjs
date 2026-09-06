@@ -34,10 +34,18 @@ try {
     return { id: request.id, ok: true };
   });
   await page.evaluate(() => {
+    window.reportedLanguages = [];
     window.__CODEX_TASKBOARD_HOST_CAPABILITY__ = 'harness';
     addEventListener('message', async event => {
       if (event.data.type !== '__codexTaskboardHostRequestV1') return;
-      const response = await window.loadHarnessFrame(event.data.payload);
+      const request = event.data.payload;
+      let response;
+      if (request.action === 'language') {
+        window.reportedLanguages.push(request.language);
+        response = { id: request.id, ok: true };
+      } else {
+        response = await window.loadHarnessFrame(request);
+      }
       postMessage({ type: '__codexTaskboardHostResponseV1', capability: 'harness', response }, location.origin);
     });
   });
