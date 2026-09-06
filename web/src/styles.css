@@ -12014,11 +12014,14 @@ kbd {
 .issue-detail-main-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; padding-right: 8px; }
 .app-shell .issue-description-input { overflow: auto; max-height: 50vh; resize: vertical; }
 .app-shell .issue-properties { min-height: 0; overflow: auto; position: static; scrollbar-width: thin; }
-.task-followup { flex-shrink: 0; margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg); box-shadow: 0 2px 8px #00000008; }
-.task-followup textarea { display: block; width: 100%; min-height: 58px; max-height: 160px; resize: vertical; overflow: auto; padding: 2px 4px; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 22px; }
-.task-followup-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; }
-.task-followup-footer span { color: var(--text-tertiary); font-size: 11px; }
-.task-followup-footer button { width: 32px; height: 32px; border: 0; border-radius: 50%; background: var(--text-primary); color: var(--bg); font-size: 22px; cursor: pointer; }
+/* The rounded form is the whole composer; no surrounding dock or spacer. */
+.task-followup { flex-shrink: 0; margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: 20px; background: var(--bg); overflow: hidden; }
+.task-followup:focus-within { border-color: var(--text-tertiary); }
+.task-followup textarea { display: block; box-sizing: border-box; width: 100%; height: 40px; min-height: 0; resize: none; overflow: auto; padding: 0 2px; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; line-height: 20px; scrollbar-width: thin; }
+.task-followup textarea::placeholder { color: var(--text-tertiary); }
+.task-followup-footer { display: flex; align-items: center; justify-content: flex-end; padding-top: 4px; }
+.task-followup-footer button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: var(--text-primary); color: var(--bg); cursor: pointer; }
+.task-followup-footer button svg { width: 18px; height: 18px; }
 .task-followup-footer button:disabled { opacity: .35; cursor: default; }
 @media (max-width: 760px) { .app-shell .issue-detail-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(200px, 1fr) auto; } .app-shell .issue-properties { max-height: 180px; order: 0; } }
 .app-shell .issue-editor { padding: 0 0 18px; }

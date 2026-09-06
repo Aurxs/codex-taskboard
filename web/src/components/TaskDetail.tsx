@@ -242,8 +242,8 @@ export function TaskDetail({
             </section>
             </div>
             {current.threadId && ["in_progress", "in_review", "done"].includes(current.status) && <form className="task-followup" onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
-              <textarea aria-label="跟进 Codex 会话" placeholder="向 Codex 补充细节或继续处理…" rows={3} value={followup} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendFollowup(); } }} />
-              <div className="task-followup-footer"><span>{sending ? "正在发送…" : "Enter 发送 · Shift+Enter 换行"}</span><button type="submit" aria-label="发送跟进消息" disabled={sending || !followup.trim()}>↑</button></div>
+              <textarea aria-label="跟进 Codex 会话" placeholder="向 Codex 补充细节或继续处理…" title="Enter 发送 · Shift+Enter 换行" rows={2} value={followup} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendFollowup(); } }} />
+              <div className="task-followup-footer"><button type="submit" aria-label="发送跟进消息" title={sending ? "正在发送…" : "发送跟进消息"} aria-busy={sending} disabled={sending || !followup.trim()}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg></button></div>
             </form>}
           </div>
           <aside className="issue-properties">
