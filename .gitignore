@@ -20,7 +20,7 @@ src-tauri/binaries/*
 .idea/
 .playwright-cli/
 .ruff_cache/
-output/
+/output/
 .DS_Store
 .env
 .env.*

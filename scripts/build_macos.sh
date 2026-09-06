@@ -58,4 +58,26 @@ npm exec -- tauri build --target aarch64-apple-darwin
 app_bundle="$repo_root/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Codex Taskboard.app"
 "$python_bin" scripts/check_sidecar_smoke.py --app "$app_bundle" --required
 
-echo "App and DMG output are under src-tauri/target/aarch64-apple-darwin/release/bundle/"
+"$python_bin" - "$repo_root" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+root = Path(sys.argv[1])
+dmg_dir = root / "src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
+dmgs = list(dmg_dir.glob("*.dmg"))
+if not dmgs:
+    raise SystemExit(f"No DMG generated in {dmg_dir}")
+latest = max(dmgs, key=lambda path: path.stat().st_mtime_ns)
+output = root / "output"
+output.mkdir(exist_ok=True)
+destination = output / latest.name
+shutil.move(str(latest), str(destination))
+# Publish successfully before removing previous packages; retain other files.
+for old in [*output.glob("*.dmg"), *dmg_dir.glob("*.dmg")]:
+    if old != destination:
+        old.unlink()
+print(f"DMG output: {destination}")
+PY
+
+echo "App output: $app_bundle"
