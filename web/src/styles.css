@@ -12118,6 +12118,78 @@ kbd {
 button.attachment-link { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; color: inherit; font: inherit; }
 .attachment-remove { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; }
 .attachment-remove:hover:not(:disabled) { color: var(--danger); }
+.attachment-card-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment-card {
+  position: relative;
+  flex: 0 0 auto;
+  width: 200px;
+  max-width: 100%;
+  height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.attachment-card.is-image { width: 80px; height: 80px; }
+
+.attachment-card-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 10px 28px 10px 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+button.attachment-card-content { cursor: pointer; }
+.attachment-card.is-image .attachment-card-content { padding: 0; }
+.attachment-card-content > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.attachment-card-icon { display: grid; place-items: center; flex: 0 0 28px; height: 32px; border-radius: 6px; background: var(--surface); color: var(--text-secondary); }
+.attachment-card-icon svg { width: 18px; height: 18px; }
+.attachment-card-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.attachment-card-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.attachment-card-copy small { color: var(--text-secondary); font-size: 10px; }
+.attachment-card.is-image .attachment-card-content:has(.attachment-card-copy) { flex-direction: column; justify-content: center; gap: 3px; padding: 8px; }
+.attachment-card.is-image .attachment-card-copy { width: 100%; text-align: center; }
+.attachment-card.is-image .attachment-card-copy strong { font-size: 10px; }
+
+.attachment-card-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.attachment-card-remove svg { width: 12px; height: 12px; }
+.attachment-card-remove:hover:not(:disabled) { background: var(--surface-hover); }
+.attachment-card-remove:disabled { opacity: .45; cursor: default; }
+.attachment-card-content:focus-visible, .attachment-card-remove:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 2px; }
+
 .attachment-preview { width: min(900px, 90vw); max-height: 85vh; padding: 0; border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary); background: var(--surface-raised); box-shadow: 0 20px 80px #0006; }
 .attachment-preview::backdrop { background: #0008; }
 .attachment-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }

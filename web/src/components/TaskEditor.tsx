@@ -8,6 +8,7 @@ import { ExecutionSettings } from "./ExecutionSettings";
 import type { ExecutionOptions } from "../types";
 import { getGitContext } from "../api";
 import { LinearIcon } from "./LinearIcon";
+import { AttachmentCard } from "./AttachmentCard";
 import { TaskboardIcon } from "./TaskboardIcon";
 
 export function TaskEditor({
@@ -89,7 +90,7 @@ export function TaskEditor({
           <label className="composer-title"><span className="sr-only">{t("任务标题")}</span><textarea aria-label={t("任务标题")} autoFocus rows={1} value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("任务标题")} /></label>
           <label className="composer-description"><span className="sr-only">{t("任务描述")}</span><textarea aria-label={t("任务描述")} rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t("补充上下文、验收标准和验证要求……")} /></label>
           {files.length > 0 && <div className="pending-attachments">
-            <ul className="composer-attachment-list">{files.map((file, index) => <li key={index}><span className="composer-attachment-copy"><strong>{file.name}</strong><span>{Math.ceil(file.size / 1024)} KB</span></span><button type="button" disabled={saving} aria-label={t("移除 {0}", file.name)} onClick={() => setFiles(current => current.filter((_, i) => i !== index))}>×</button></li>)}</ul>
+            <ul className="attachment-card-list">{files.map((file, index) => <AttachmentCard key={index} file={file} disabled={saving} onRemove={() => setFiles(current => current.filter((_, i) => i !== index))} />)}</ul>
           </div>}
           <div className="composer-properties">
             {!parent && <TaskPropertyPicker ariaLabel={t("任务形态")} value={execution.kind ?? "task"} open={kindOpen} onOpenChange={setKindOpen} disabled={!!task || saving}
