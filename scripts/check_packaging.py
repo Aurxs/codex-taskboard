@@ -12,6 +12,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 from injector.cdp_injector import decode_frame_bytes, encode_client_frame  # noqa: E402
 
@@ -22,12 +23,18 @@ def main() -> int:
         ROOT / "injector" / "sidecar.py",
         ROOT / "scripts" / "dev.py",
         ROOT / "scripts" / "build_sidecar.py",
+        ROOT / "scripts" / "build_windows.py",
+        *(ROOT / "src" / "codex_taskboard" / "platforms").glob("*.py"),
     ]
     for path in python_files:
         py_compile.compile(str(path), doraise=True)
     for path in [ROOT / "src-tauri" / "tauri.conf.json", ROOT / "src-tauri" / "capabilities" / "default.json"]:
         json.loads(path.read_text(encoding="utf-8"))
-    subprocess.run(["bash", "-n", str(ROOT / "scripts" / "build_macos.sh")], check=True)
+    if sys.platform != "win32":
+        subprocess.run(["bash", "-n", str(ROOT / "scripts" / "build_macos.sh")], check=True)
+    for platform in ("macos", "windows"):
+        json.loads((ROOT / "src-tauri" / f"tauri.{platform}.conf.json").read_text(encoding="utf-8"))
+    assert (ROOT / "src-tauri/icons/icon.ico").read_bytes()[:4] == bytes([0, 0, 1, 0])
     build_script = (ROOT / "scripts" / "build_sidecar.py").read_text(encoding="utf-8")
     assert '"--paths"' in build_script and 'ROOT / "src"' in build_script
     assert build_script.count('"--collect-submodules"') >= 2
@@ -40,7 +47,7 @@ def main() -> int:
         _fin, opcode, decoded, consumed = decode_frame_bytes(frame)
         assert opcode == 1 and decoded == payload and consumed == len(frame)
     print(
-        f"checked {len(python_files)} Python files, 2 JSON files, build scripts, "
+        f"checked {len(python_files)} Python files, 4 JSON files, build scripts, "
         "and WebSocket frames (sidecar runtime smoke is a separate check)"
     )
     return 0

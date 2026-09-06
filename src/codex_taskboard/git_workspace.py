@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .errors import ValidationError
+from .platforms import hidden_process_options
 
 
 class GitError(ValidationError):
@@ -16,6 +17,7 @@ def git(cwd: str, *args: str, check: bool = True) -> str:
     try:
         result = subprocess.run(
             ["git", "-C", cwd, *args], capture_output=True, timeout=30,
+            **hidden_process_options(),
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_MERGE_AUTOEDIT": "no"},
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -64,7 +66,7 @@ def clean(cwd: str) -> bool:
 
 def is_ancestor(cwd: str, older: str, newer: str) -> bool:
     result = subprocess.run(["git", "-C", cwd, "merge-base", "--is-ancestor", older, newer],
-                            capture_output=True, timeout=30)
+                            capture_output=True, timeout=30, **hidden_process_options())
     if result.returncode not in (0, 1):
         raise GitError(result.stderr.decode(errors="replace"))
     return result.returncode == 0
@@ -77,9 +79,9 @@ def normalize_scopes(scopes: list[str], root: str | None = None) -> list[str]:
             raise ValidationError("修改范围必须是文件或目录路径")
         value = raw.strip().replace("\\", "/")
         path = PurePosixPath(value)
-        if not value or path.is_absolute() or ".." in path.parts or any(c in value for c in "*?[]\x00"):
+        if not value or path.is_absolute() or PureWindowsPath(value).drive or ":" in value or ".." in path.parts or any(c in value for c in "*?[]\x00"):
             raise ValidationError("修改范围必须是仓库内的明确文件或目录，不支持通配符")
-        if ".git" in path.parts:
+        if any(part.casefold().rstrip(" .") == ".git" for part in path.parts):
             raise ValidationError("修改范围不能包含 Git 内部目录")
         if root:
             resolved = (Path(root) / value).resolve()

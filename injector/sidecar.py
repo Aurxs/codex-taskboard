@@ -20,6 +20,8 @@ from typing import Any
 from urllib.error import URLError
 from urllib.request import ProxyHandler, build_opener
 
+from codex_taskboard.platforms import configure_standard_streams, user_data_directory
+
 from injector.cdp_injector import (
     CdpInjector,
     DEFAULT_CDP_PORT,
@@ -43,9 +45,7 @@ def default_data_directory() -> Path:
         return Path(configured).expanduser().resolve()
     if os.environ.get("CODEX_TASKBOARD_DEV") == "1":
         return Path.cwd() / ".data"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Codex Taskboard"
-    return Path.home() / ".local" / "share" / "Codex Taskboard"
+    return user_data_directory()
 
 
 def static_directory() -> Path | None:
@@ -192,6 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_standard_streams()
     args = build_parser().parse_args(argv)
     if args.host not in {"127.0.0.1", "localhost"}:
         print("The packaged sidecar only binds the Taskboard service to loopback", file=sys.stderr)
@@ -239,6 +240,8 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, request_stop)
     if hasattr(signal, "SIGUSR1"):
         signal.signal(signal.SIGUSR1, request_open)
     try:

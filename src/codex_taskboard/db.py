@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .constants import ALL_PRIORITIES, ALL_STATUSES, Priority, TaskStatus
+from .platforms import attachment_filename
 from .errors import ConflictError, NotFoundError, ValidationError
 from .parallel_db import ParallelDatabase
 
@@ -824,7 +825,7 @@ class Database(ParallelDatabase):
         name, content = self.get_attachment(attachment_id)
         folder = self.path.resolve().parent / "attachments" / attachment_id
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / name
+        path = folder / attachment_filename(name)
         if not path.exists() or path.read_bytes() != content:
             path.write_bytes(content)
         return path

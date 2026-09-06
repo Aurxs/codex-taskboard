@@ -15,9 +15,11 @@ from urllib.request import ProxyHandler, build_opener
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SIDECAR_SUFFIX = ".exe" if sys.platform == "win32" else ""
+SIDECAR_TARGET = "x86_64-pc-windows-msvc" if sys.platform == "win32" else "aarch64-apple-darwin"
 DEFAULT_BINARIES = (
-    ROOT / "src-tauri" / "binaries" / "codex-taskboard-sidecar-aarch64-apple-darwin",
-    ROOT / ".build" / "sidecar-dist" / "codex-taskboard-sidecar",
+    ROOT / "src-tauri" / "binaries" / f"codex-taskboard-sidecar-{SIDECAR_TARGET}{SIDECAR_SUFFIX}",
+    ROOT / ".build" / "sidecar-dist" / f"codex-taskboard-sidecar{SIDECAR_SUFFIX}",
 )
 DEFAULT_SIDECAR_NAME = "codex-taskboard-sidecar"
 
@@ -68,6 +70,10 @@ def smoke(binary: Path) -> None:
         )
         try:
             wait_for_health(port, process)
+            opener = build_opener(ProxyHandler({}))
+            with opener.open(f"http://127.0.0.1:{port}/", timeout=3) as response:
+                if response.status != 200 or b"<html" not in response.read().lower():
+                    raise RuntimeError("sidecar did not serve the packaged frontend")
         finally:
             if process.poll() is None:
                 control_file.write_text(f"{time.time_ns()}\nstop\n", encoding="utf-8")
@@ -76,7 +82,7 @@ def smoke(binary: Path) -> None:
             except subprocess.TimeoutExpired:
                 process.kill()
                 output = process.communicate(timeout=2)[0].decode("utf-8", errors="replace")
-            if process.returncode not in (0, -15, 143):
+            if process.returncode != 0:
                 raise RuntimeError(f"sidecar shutdown failed ({process.returncode}): {output[-2000:]}")
 
 
@@ -116,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         message = "SKIPPED: no frozen sidecar found; build it before running the runtime smoke check"
         print(message)
         return 1 if args.required else 0
-    if not binary.is_file() or not binary.stat().st_mode & 0o111:
+    if not binary.is_file() or (sys.platform != "win32" and not binary.stat().st_mode & 0o111):
         print(f"FAILED: sidecar is not an executable file: {binary}", file=sys.stderr)
         return 1
     try:

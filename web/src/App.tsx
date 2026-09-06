@@ -329,7 +329,7 @@ function EmbeddedTaskboard() {
     observer.observe(element);
     window.addEventListener("resize", report);
     return () => { observer.disconnect(); window.removeEventListener("resize", report); };
-  }, [hostContext?.titlebarLeftInset]);
+  }, [hostContext?.titlebarLeftInset, hostContext?.titlebarRightInset]);
 
   useEffect(() => {
     if (!hasHostContext) return;
@@ -524,7 +524,7 @@ function EmbeddedTaskboard() {
     });
   }, [search, tasks]);
   const grouped = useMemo(() => Object.fromEntries(COLUMN_ORDER.map((status) => [status, visibleTasks.filter((task) => task.status === status).sort((a, b) => status === "done" ? Date.parse(b.completedAt ?? b.updatedAt) - Date.parse(a.completedAt ?? a.updatedAt) : 0)])) as Record<AnyTaskStatus, Task[]>, [visibleTasks]);
-  const appShellStyle = { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px`, "--main-column-count": columns.length, "--main-board-min-width": `${columns.length * 300 + (columns.length - 1) * 24}px`, "--main-board-max-width": `${columns.length * 400 + (columns.length - 1) * 24}px` } as CSSProperties;
+  const appShellStyle = { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px`, "--codex-titlebar-right-inset": `${hostContext?.titlebarRightInset ?? 0}px`, "--main-column-count": columns.length, "--main-board-min-width": `${columns.length * 300 + (columns.length - 1) * 24}px`, "--main-board-max-width": `${columns.length * 400 + (columns.length - 1) * 24}px` } as CSSProperties;
 
   return (
     <div className="app-shell embedded" style={appShellStyle}>

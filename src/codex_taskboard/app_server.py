@@ -12,15 +12,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shlex
 import shutil
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from .errors import AppServerError, UsageLimitExceeded
+from .platforms import desktop, split_command, executable_command, hidden_process_options
 
 ServerRequestHandler = Callable[[str, str | int, dict[str, Any]], Awaitable[Any]]
 NotificationHandler = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -45,14 +44,14 @@ class AppServerUnavailable(AppServerError):
 def default_command() -> list[str]:
     configured = os.environ.get("CODEX_APP_SERVER_COMMAND", "").strip()
     if configured:
-        return shlex.split(configured)
+        return executable_command(split_command(configured))
     configured_bin = os.environ.get("CODEX_BIN", "").strip()
     codex_bin = configured_bin or _installed_codex_bundle()
     if not codex_bin:
         codex_bin = shutil.which("codex")
     # --stdio is explicit for sidecar launches and is equivalent to the
     # app-server default transport in Codex 0.153.x.
-    return [codex_bin or "codex", "app-server", "--stdio"]
+    return executable_command([codex_bin or "codex", "app-server", "--stdio"])
 
 
 def _installed_codex_bundle() -> str | None:
@@ -63,14 +62,8 @@ def _installed_codex_bundle() -> str | None:
     require a separate PATH install or an API key.  The explicit environment
     overrides above remain useful for tests and development.
     """
-    if sys.platform != "darwin":
-        return None
-    app_roots = (Path("/Applications"), Path.home() / "Applications")
-    for app_root in app_roots:
-        for app_name in ("ChatGPT.app", "Codex.app"):
-            candidate = app_root / app_name / "Contents" / "Resources" / "codex"
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return str(candidate)
+    if sys.platform in {"darwin", "win32"}:
+        return desktop().bundled_agent()
     return None
 
 
@@ -174,6 +167,7 @@ class CodexAppServer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=16 * 1024 * 1024,
+                **hidden_process_options(),
             )
         except (FileNotFoundError, OSError) as exc:
             self.process = None

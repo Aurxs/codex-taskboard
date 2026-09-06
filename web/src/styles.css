@@ -12294,3 +12294,11 @@ button.attachment-card-content { cursor: pointer; }
 .merge-history p { margin: 6px 0; overflow-wrap: anywhere; }
 .merge-history code { font-size: 11px; user-select: text; }
 .merge-history-entry { border-top: 1px solid var(--border); padding: 10px 0; }
+
+/* The host supplies caption-button geometry on Windows; the UI stays shared. */
+.app-shell.embedded .workspace-header {
+  padding-right: calc(16px + var(--codex-titlebar-right-inset, 0px));
+}
+.app-shell.embedded .home-window-drag-region {
+  right: var(--codex-titlebar-right-inset, 0px);
+}

@@ -4,7 +4,7 @@
   <p><strong>把任务排进看板，让 Codex 接着做。</strong></p>
   <p>本地优先 · Codex 内嵌看板 · 任务依赖 · 自动调度 · 人工确认</p>
   <p>
-    <img src="https://img.shields.io/badge/platform-macOS_14%2B_Apple_Silicon-black" alt="macOS 14+ Apple Silicon" />
+    <img src="https://img.shields.io/badge/platform-macOS_Apple_Silicon_%7C_Windows_x64-black" alt="macOS Apple Silicon | Windows x64" />
     <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="版本 0.1.0" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0" /></a>
   </p>
@@ -85,12 +85,12 @@ Taskboard 自动跟随 Codex 的显示语言：简体中文显示中文，其余
 
 ## 系统要求
 
-- macOS 14 或更高版本，Apple Silicon（arm64）；当前不提供 Windows、Linux 或 Intel Mac 支持。
+- macOS 14 或更高版本，Apple Silicon（arm64）；新增 Windows 11 x64 平台实现与安装包构建，Windows 实机验收仍待完成。Linux、Intel Mac 与 Windows ARM64 尚未验证。
 - 已安装并登录的 Codex 桌面客户端。
 - 从源码运行：Python 3.13+、Node.js 22+ 和 npm。
 - 构建 App / DMG：额外需要 Xcode Command Line Tools、Rust 与 PyInstaller；Tauri CLI 已列入 npm 开发依赖。
 
-Windows 的可复用部分、适配障碍和建议验证顺序见 [Windows 兼容性评估](docs/windows-compatibility.zh-CN.md)；该评估不代表当前版本已支持 Windows。
+Windows 的安装、开发、模块边界与实机验收状态见 [Windows 使用与开发](docs/windows.zh-CN.md)。
 
 ## 快速开始
 
@@ -136,6 +136,21 @@ python3 -m injector.cdp_injector --port 9229 --no-launch
 
 默认会请求 renderer 范围的 CDP CSP bypass，以便 loopback iframe 在 Codex 的 CSP 下加载；不需要时可以使用 `--no-csp-bypass`。该设置不写入 Codex 文件，且只作用于当前 CDP renderer。
 
+## Windows 开发与安装包
+
+在 Windows 安装 Python 3.13+ x64、Node.js 22+、Git、Rust MSVC/C++ Build Tools 后，使用 PowerShell：
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e . pyinstaller httpx ruff
+npm ci
+.\.venv\Scripts\python.exe scripts/dev.py
+# 构建 NSIS 安装器到 output/
+.\.venv\Scripts\python.exe scripts/build_windows.py
+```
+
+Windows 图标位于任务栏右侧通知区域，菜单、任务面板与 macOS 共用。数据保存在 `%APPDATA%\com.codex.taskboard`。详细说明和待实机验收项目见 [Windows 使用与开发](docs/windows.zh-CN.md)。
+
 ## 构建 macOS App 与 DMG
 
 打包还需要 Rust、Tauri CLI、PyInstaller 和 Apple Silicon macOS。先安装项目依赖，再执行：
@@ -149,7 +164,7 @@ bash scripts/build_macos.sh
 
 `scripts/build_macos.sh` 会先运行 `npm run build:web`，再由 `build_sidecar.py` 校验 `dist/web/index.html` 并把整个 `dist/web` 与 `src/codex_taskboard` 收进 PyInstaller sidecar，最后执行 Tauri build。没有配置 Developer ID 时，脚本会使用完整的本地 ad-hoc 签名；该产物可用于本机测试，但没有经过 Apple 公证。打包态 sidecar 会在导入 FastAPI 前将 PyInstaller 的 `_MEIPASS/dist/web` 设置为 `CODEX_TASKBOARD_STATIC_DIR`，因此 iframe 仍然指向 loopback 的 FastAPI `47823`，不需要额外的静态文件服务器。开发运行时也会自动探测仓库根目录的 `dist/web`；如需覆盖可直接设置 `CODEX_TASKBOARD_STATIC_DIR`。
 
-Tauri 配置在 `src-tauri/tauri.conf.json`，shell 权限在 `src-tauri/capabilities/default.json`。启动器只显示 macOS 菜单栏图标，`LSUIElement` 与 `ActivationPolicy::Accessory` 共同确保它不常驻 Dock，也不会创建独立任务面板窗口。菜单可查看注入状态、在 Codex 中打开任务面板、重启服务、打开启动日志或退出。打开和停止命令通过应用支持目录中的本地 control mailbox 发送给 frozen sidecar；退出 Taskboard 不会顺带关闭用户的 Codex 窗口。未安装 Rust、Tauri CLI 或 PyInstaller 时，脚本会明确失败，不会声称已经生成 `.app`/DMG。
+Tauri 配置在 `src-tauri/tauri.conf.json`，shell 权限在 `src-tauri/capabilities/default.json`。macOS 启动器只显示菜单栏图标，`LSUIElement` 与 `ActivationPolicy::Accessory` 共同确保它不常驻 Dock，也不会创建独立任务面板窗口。菜单可查看注入状态、在 Codex 中打开任务面板、重启服务、打开启动日志或退出。打开和停止命令通过应用支持目录中的本地 control mailbox 发送给 frozen sidecar；退出 Taskboard 不会顺带关闭用户的 Codex 窗口。未安装 Rust、Tauri CLI 或 PyInstaller 时，脚本会明确失败，不会声称已经生成 `.app`/DMG。
 
 构建脚本最后会执行 sidecar 冒烟检查。开发者也可按需手动运行以下检查：
 

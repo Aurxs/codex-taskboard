@@ -16,24 +16,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "app",
-      "dmg"
-    ],
     "category": "Productivity",
     "shortDescription": "在 Codex 客户端中管理本地任务",
     "longDescription": "本地优先的极简 Codex 任务调度器",
     "externalBin": [
       "binaries/codex-taskboard-sidecar"
     ],
-    "macOS": {
-      "minimumSystemVersion": "14.0",
-      "hardenedRuntime": true,
-      "entitlements": "Entitlements.plist"
-    },
     "icon": [
       "icons/icon.png",
-      "icons/icon.icns"
-    ]
+      "icons/icon.ico"
+    ],
+    "targets": "all"
   }
 }

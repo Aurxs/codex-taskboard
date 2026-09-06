@@ -278,11 +278,26 @@ class HttpContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn(expected, run.call_args.args[0][-1])
 
-    async def test_directory_picker_is_explicitly_unsupported_off_macos(self) -> None:
+    async def test_directory_picker_is_explicitly_unsupported_off_desktop_platforms(self) -> None:
         with patch("codex_taskboard.app.sys.platform", "linux"):
             response = await self.client.post("/api/system/pick-directory")
         self.assertEqual(response.status_code, 501)
         self.assertEqual(response.json()["error"]["code"], "NOT_IMPLEMENTED")
+
+    async def test_windows_directory_picker_preserves_drive_root_and_cancel(self) -> None:
+        for workspace in ("C:\\", "C:\\项目 空格"):
+            with patch("codex_taskboard.app.sys.platform", "win32"), patch(
+                "codex_taskboard.platforms.windows.pick_directory",
+                return_value=Mock(returncode=0, stdout=workspace),
+            ):
+                response = await self.client.post("/api/system/pick-directory")
+                self.assertEqual(response.json(), {"workspacePath": workspace})
+        with patch("codex_taskboard.app.sys.platform", "win32"), patch(
+            "codex_taskboard.platforms.windows.pick_directory",
+            return_value=Mock(returncode=1, stdout=""),
+        ):
+            response = await self.client.post("/api/system/pick-directory")
+            self.assertEqual(response.status_code, 409)
 
     async def test_opaque_embedded_frame_origin_is_allowed_by_cors(self) -> None:
         response = await self.client.options(

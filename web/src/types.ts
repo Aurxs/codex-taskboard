@@ -195,6 +195,7 @@ export interface HostContext {
     hostId?: string;
   }>;
   titlebarLeftInset?: number;
+  titlebarRightInset?: number;
   sidebarCollapsed?: boolean;
   threadRunning?: boolean;
   threadTodoProgress?: {

@@ -1,0 +1,39 @@
+name: Windows build
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONWARNINGS: ignore::DeprecationWarning
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: python -m pip install -e . pyinstaller httpx ruff
+      - run: npm ci
+      - name: Platform and shared integration contracts
+        run: python -m unittest tests.test_platforms tests.test_injector_profile tests.test_app_server_contract tests.test_worktree_bridge tests.test_browser_bridge tests.test_i18n_bridge tests.test_parallel
+      - run: ruff check src/codex_taskboard/platforms tests/test_platforms.py scripts/build_sidecar.py scripts/build_windows.py
+      - run: python scripts/check_packaging.py
+      - run: node scripts/check_windows_host.mjs
+      - name: Build installer and verify frozen sidecar
+        run: python scripts/build_windows.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-taskboard-windows-x64
+          path: output/*-setup.exe

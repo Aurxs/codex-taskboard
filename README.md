@@ -4,7 +4,7 @@
   <p><strong>Put your tasks on a board and let Codex take it from there.</strong></p>
   <p>Local-first · Codex-embedded board · Task dependencies · Automatic scheduling · Human review</p>
   <p>
-    <img src="https://img.shields.io/badge/platform-macOS_14%2B_Apple_Silicon-black" alt="macOS 14+ Apple Silicon" />
+    <img src="https://img.shields.io/badge/platform-macOS_Apple_Silicon_%7C_Windows_x64-black" alt="macOS Apple Silicon | Windows x64" />
     <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version 0.1.0" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="Apache-2.0" /></a>
   </p>
@@ -85,7 +85,7 @@ Task titles, descriptions, attachments, and conversation content stay in their o
 
 ## Requirements
 
-- macOS 14 or later on Apple Silicon (arm64); Windows, Linux, and Intel Macs are currently unsupported.
+- macOS 14 or later on Apple Silicon (arm64). Windows 11 x64 platform support and installer builds are implemented; Windows desktop acceptance testing is still pending. Linux, Intel Mac, and Windows ARM64 are unverified.
 - An installed and signed-in Codex desktop app.
 - For running from source: Python 3.13+, Node.js 22+, and npm.
 - For building the App / DMG: Xcode Command Line Tools, Rust, and PyInstaller are also required; the Tauri CLI is included in the npm development dependencies.
@@ -138,6 +138,21 @@ The injector automatically looks for an installed ChatGPT.app/Codex.app in `/App
 
 By default, the injector requests a renderer-scoped CDP CSP bypass so the loopback iframe can load under Codex’s CSP. Use `--no-csp-bypass` when it is unnecessary. This setting is not written to Codex files and applies only to the current CDP renderer.
 
+## Windows development and installer
+
+Install Python 3.13+ x64, Node.js 22+, Git, Rust MSVC, and the C++ Build Tools. In PowerShell:
+
+```powershell
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e . pyinstaller httpx ruff
+npm ci
+.\.venv\Scripts\python.exe scripts/dev.py
+# Build an NSIS installer into output/
+.\.venv\Scripts\python.exe scripts/build_windows.py
+```
+
+On Windows the icon lives in the taskbar notification area. Menus, UI, scheduling, and the desktop bridge are shared with macOS; native APIs are isolated in platform modules. Data is stored in `%APPDATA%\com.codex.taskboard`. Windows CI builds the installer and runs a frozen-sidecar smoke without connecting to Codex. Actual Windows Codex integration still needs desktop acceptance testing; see the [Windows guide and verification status (Chinese)](docs/windows.zh-CN.md).
+
 ## Building the macOS App and DMG
 
 Packaging also requires Rust, the Tauri CLI, PyInstaller, and Apple Silicon macOS. Install the project dependencies first, then run:
@@ -151,7 +166,7 @@ After a successful build and sidecar smoke check, the latest DMG is moved to the
 
 `scripts/build_macos.sh` first runs `npm run build:web`. `build_sidecar.py` then verifies `dist/web/index.html` and packages the entire `dist/web` directory and `src/codex_taskboard` into the PyInstaller sidecar before running the Tauri build. Without a configured Developer ID, the script uses a full local ad-hoc signature; the artifact is suitable for local testing but has not been notarized by Apple. In the packaged sidecar, PyInstaller’s `_MEIPASS/dist/web` is assigned to `CODEX_TASKBOARD_STATIC_DIR` before FastAPI is imported, so the iframe still points to loopback FastAPI `47823` and no separate static file server is needed. Development runs also detect `dist/web` at the repository root automatically; set `CODEX_TASKBOARD_STATIC_DIR` to override it.
 
-The Tauri configuration is in `src-tauri/tauri.conf.json`, and shell permissions are in `src-tauri/capabilities/default.json`. The launcher only displays a macOS menu bar icon; `LSUIElement` and `ActivationPolicy::Accessory` keep it out of the Dock and prevent it from creating a standalone Taskboard window. The menu can show injection status, open Taskboard in Codex, restart the service, open the startup log, or quit. Open and stop commands are sent to the frozen sidecar through a local control mailbox in the application support directory; quitting Taskboard does not also close the user’s Codex window. If Rust, the Tauri CLI, or PyInstaller is missing, the script fails clearly instead of claiming that an `.app` or DMG was generated.
+The Tauri configuration is in `src-tauri/tauri.conf.json`, and shell permissions are in `src-tauri/capabilities/default.json`. On macOS, the launcher only displays a menu bar icon; `LSUIElement` and `ActivationPolicy::Accessory` keep it out of the Dock and prevent it from creating a standalone Taskboard window. The menu can show injection status, open Taskboard in Codex, restart the service, open the startup log, or quit. Open and stop commands are sent to the frozen sidecar through a local control mailbox in the application support directory; quitting Taskboard does not also close the user’s Codex window. If Rust, the Tauri CLI, or PyInstaller is missing, the script fails clearly instead of claiming that an `.app` or DMG was generated.
 
 The build script ends with a sidecar smoke check. Developers can also run these checks manually:
 

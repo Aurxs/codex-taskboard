@@ -19,6 +19,9 @@ from urllib.request import urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from codex_taskboard.platforms import executable_command, process_group_options, terminate_process_tree  # noqa: E402
 
 
 def _port(value: str, name: str) -> int:
@@ -66,28 +69,15 @@ def _process_alive(process: subprocess.Popen[bytes]) -> bool:
 def _spawn(command: list[str], env: dict[str, str], *, label: str) -> subprocess.Popen[bytes]:
     print(f"Starting {label}: {' '.join(command)}", flush=True)
     return subprocess.Popen(
-        command,
+        executable_command(command),
         cwd=ROOT,
         env=env,
-        start_new_session=True,
+        **process_group_options(),
     )
 
 
 def _terminate(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except (ProcessLookupError, OSError):
-        return
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and _process_alive(process):
-        time.sleep(0.1)
-    if _process_alive(process):
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (ProcessLookupError, OSError):
-            pass
+    terminate_process_tree(process)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -145,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, stop)
     try:
         if start_backend and not shared_backend:
             children.append(

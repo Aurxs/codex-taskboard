@@ -1,4 +1,6 @@
-# Windows 兼容性评估
+# Windows 兼容性评估（历史记录）
+
+> 下文记录适配前的评估基线。后续 Windows 平台实现与当前验收状态见 [Windows 使用与开发](windows.zh-CN.md)。
 
 评估日期：2026-09-06。代码基线：`dab28ae`。对应任务：`CODEX-TASKBOARD-66AE0A-33`。
 

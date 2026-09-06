@@ -23,6 +23,7 @@ from .db import Database
 from .errors import ConflictError, TaskboardError, UnsupportedError, ValidationError
 from .events import EventBus
 from .scheduler import Scheduler
+from .platforms import desktop, user_data_directory
 
 
 class StrictModel(BaseModel):
@@ -142,7 +143,7 @@ def default_data_dir() -> Path:
     if os.environ.get("CODEX_TASKBOARD_DEV", "").lower() in {"1", "true", "yes"}:
         return Path.cwd() / ".data"
     if getattr(sys, "frozen", False) or os.environ.get("CODEX_TASKBOARD_PACKAGED") == "1":
-        return Path.home() / "Library" / "Application Support" / "Codex Taskboard"
+        return user_data_directory()
     return Path.cwd() / ".data"
 
 
@@ -337,32 +338,23 @@ def create_app(
 
     @app.post("/api/system/pick-directory")
     async def pick_directory(request: Request) -> dict[str, str]:
-        if sys.platform != "darwin":
-            raise UnsupportedError("Directory picker is only available on macOS")
+        if sys.platform not in {"darwin", "win32"}:
+            raise UnsupportedError("Directory picker is only available on macOS and Windows")
         prompt = (
             "选择 Codex 项目目录"
             if request.headers.get("accept-language") == "zh-CN"
             else "Choose a Codex project directory"
         )
         try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [
-                    "/usr/bin/osascript",
-                    "-e",
-                    f'POSIX path of (choose folder with prompt "{prompt}")',
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
+            result = await asyncio.to_thread(desktop().pick_directory, prompt)
         except subprocess.TimeoutExpired as exc:
             raise TaskboardError("Directory picker timed out") from exc
         if result.returncode != 0:
             # osascript uses a non-zero exit for the user's Cancel action.
             raise ConflictError("Directory selection canceled")
-        workspace = result.stdout.strip().rstrip("/")
+        workspace = result.stdout.strip()
+        if workspace not in {"/", "\\"} and not (len(workspace) == 3 and workspace[1] == ":"):
+            workspace = workspace.rstrip("/\\")
         if not workspace or "\x00" in workspace:
             raise ValidationError("Directory picker returned no usable path")
         return {"workspacePath": workspace}

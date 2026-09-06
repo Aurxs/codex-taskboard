@@ -306,6 +306,17 @@
     return Number.isFinite(left) ? Math.max(0, Math.ceil(80 - left)) : 0;
   }
 
+  function titlebarRightInset() {
+    // Electron's overlay API reports actual caption button geometry, including
+    // DPI changes and fullscreen. Native framed windows need no extra inset.
+    const overlay = navigator.windowControlsOverlay;
+    const surface = findPageMount()?.surface.getBoundingClientRect();
+    if (!overlay?.visible || !surface) return 0;
+    const area = overlay.getTitlebarAreaRect();
+    if (surface.top >= area.y + area.height) return 0;
+    return Math.max(0, Math.ceil(surface.right - (area.x + area.width)));
+  }
+
   function userIdFromName(name) {
     const slug = String(name || "").normalize("NFKD").toLowerCase()
       .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 96);
@@ -336,7 +347,8 @@
     if (!path) return "";
     const windowsPath = /^[A-Za-z]:[\\/]/.test(path) || path.includes("\\");
     const slashes = windowsPath ? path.replaceAll("\\", "/") : path;
-    const withoutTrailing = slashes.replace(/\/+$/, "") || (slashes.startsWith("/") ? "/" : slashes);
+    const withoutTrailing = /^[A-Za-z]:\/+$/.test(slashes) ? `${slashes.slice(0, 2)}/`
+      : slashes.replace(/\/+$/, "") || (slashes.startsWith("/") ? "/" : slashes);
     if (!windowsPath || !/^[A-Za-z]:/.test(withoutTrailing)) return withoutTrailing;
     return `${withoutTrailing[0].toLowerCase()}${withoutTrailing.slice(1)}`;
   }
@@ -487,6 +499,7 @@
       activeWorkspaceRoots: activeRoots,
       user: readCodexUser(),
       titlebarLeftInset: titlebarLeftInset(),
+      titlebarRightInset: titlebarRightInset(),
       sidebarCollapsed: nativeSidebarCollapsed(),
       ...(workspacePath ? { workspacePath } : {}),
       ...(projectId ? { projectId } : {}),

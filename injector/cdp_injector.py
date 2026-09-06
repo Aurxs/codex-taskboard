@@ -20,7 +20,6 @@ import base64
 import hashlib
 import json
 import os
-import plistlib
 from pathlib import Path
 import re
 import secrets
@@ -35,19 +34,15 @@ import time
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
-from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+from codex_taskboard.platforms import configure_standard_streams, desktop, user_data_directory
 
 
 DEFAULT_CDP_PORT = 9229
 DEFAULT_FALLBACK_CDP_PORT = 9231
 DEFAULT_TASKBOARD_PORT = 47823
 DEFAULT_TASKBOARD_URL = f"http://127.0.0.1:{DEFAULT_TASKBOARD_PORT}"
-CODEX_APP_CANDIDATES = (
-    "/Applications/ChatGPT.app",
-    "~/Applications/ChatGPT.app",
-    "/Applications/Codex.app",
-    "~/Applications/Codex.app",
-)
 # Kept as a compatibility export for the sidecar and development scripts.
 # An empty value means "discover the installed app"; no user path is needed.
 DEFAULT_CODEX_APP = ""
@@ -88,9 +83,7 @@ def default_codex_source_profile() -> Path | None:
     configured = os.environ.get("CODEX_TASKBOARD_CODEX_SOURCE_PROFILE", "").strip()
     if configured:
         return Path(configured).expanduser().resolve()
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Codex"
-    return None
+    return desktop().source_profile() if sys.platform in {"darwin", "win32"} else None
 
 
 def import_codex_browser_profile(
@@ -141,7 +134,7 @@ def import_codex_browser_profile(
             os.close(fd)
             temporary_path = Path(temporary_name)
             try:
-                source_uri = f"file:{quote(str(source_path), safe='/')}?mode=ro"
+                source_uri = source_path.as_uri() + "?mode=ro"
                 source_db = sqlite3.connect(source_uri, uri=True)
                 destination_db = sqlite3.connect(str(temporary_path))
                 try:
@@ -186,57 +179,16 @@ def _runtime_exception_message(result: dict[str, Any], operation: str) -> str:
 
 
 def discover_codex_app() -> Path | None:
-    """Return the first supported installed Codex/ChatGPT app bundle.
-
-    LaunchServices can find an app which is not in ``/Applications`` (for
-    example an app kept in ``~/Applications`` or a developer copy).  The
-    fixed paths remain the fast path, while the small ``mdfind`` fallback
-    keeps the packaged launcher from requiring an app path setting.
-    """
-
-    if sys.platform != "darwin":
-        return None
-    configured = os.environ.get("CODEX_TASKBOARD_CODEX_APP", "").strip()
-    candidates = ([configured] if configured else []) + list(CODEX_APP_CANDIDATES)
-    for candidate in candidates:
-        path = Path(candidate).expanduser()
-        if path.is_dir() and path.suffix.lower() == ".app":
-            return path.resolve()
     try:
-        result = subprocess.run(
-            [
-                "/usr/bin/mdfind",
-                "-0",
-                "kMDItemContentType == 'com.apple.application-bundle' && "
-                "(kMDItemFSName == 'ChatGPT.app' || kMDItemFSName == 'Codex.app')",
-            ],
-            check=False,
-            capture_output=True,
-            timeout=3,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    for raw_path in result.stdout.split(b"\0"):
-        if not raw_path:
-            continue
-        path = Path(raw_path.decode("utf-8", errors="ignore"))
-        if path.is_dir() and path.suffix.lower() == ".app":
-            return path.resolve()
-    return None
+        return desktop().discover_app()
+    except RuntimeError:
+        if sys.platform not in {"darwin", "win32"}:
+            return None
+        raise
 
 
 def codex_executable_path(app_path: Path) -> Path:
-    """Resolve the actual Electron executable inside an app bundle."""
-
-    info_path = app_path / "Contents" / "Info.plist"
-    try:
-        with info_path.open("rb") as stream:
-            executable_name = plistlib.load(stream).get("CFBundleExecutable")
-    except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
-        executable_name = None
-    if not isinstance(executable_name, str) or not executable_name.strip():
-        executable_name = app_path.stem
-    return app_path / "Contents" / "MacOS" / executable_name.strip()
+    return desktop().executable_path(app_path)
 
 
 def _read_json(url: str, timeout: float = 1.5) -> Any:
@@ -840,57 +792,22 @@ class CdpInjector:
             print(f"Codex Taskboard could not bring the Codex page to front: {exc}", file=sys.stderr, flush=True)
 
     def _activate_codex_app(self) -> None:
-        """Safely activate the already discovered Codex app on macOS."""
-
-        if sys.platform != "darwin" or not self.managed_pid:
-            return
-        # NSRunningApplication activation targets the existing process.  It
-        # does not call `open -n`, create a new window, or touch Codex data.
-        script = (
-            "ObjC.import('AppKit'); "
-            f"const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier({self.managed_pid}); "
-            "if (!app || !app.activateWithOptions(1)) throw new Error('Unable to activate Codex');"
-        )
-        try:
-            result = subprocess.run(
-                ["/usr/bin/osascript", "-l", "JavaScript", "-e", script],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except OSError as exc:
-            print(f"Codex Taskboard could not activate Codex: {exc}", file=sys.stderr, flush=True)
-            return
-        if result.returncode != 0:
-            print("Codex Taskboard could not activate Codex", file=sys.stderr, flush=True)
+        if self.managed_pid:
+            try:
+                desktop().activate(self.managed_pid)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                print(f"Codex Taskboard could not activate Codex: {exc}", file=sys.stderr, flush=True)
 
     @staticmethod
     def _process_table() -> list[tuple[int, str]]:
         try:
-            result = subprocess.run(
-                ["/bin/ps", "-ww", "-axo", "pid=,command="],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except (OSError, subprocess.CalledProcessError):
-            return []
-        rows: list[tuple[int, str]] = []
-        for line in result.stdout.splitlines():
-            parts = line.strip().split(None, 1)
-            if len(parts) != 2:
-                continue
-            try:
-                rows.append((int(parts[0]), parts[1]))
-            except ValueError:
-                continue
-        return rows
+            return desktop().process_table()
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise InjectorError(f"Could not inspect Codex processes: {exc}") from exc
 
     def _codex_process_command(self, command: str) -> bool:
-        if self.app_path is None:
-            return False
-        executable = str(codex_executable_path(self.app_path))
-        return command == executable or command.startswith(f"{executable} ")
+        return self.app_path is not None and desktop().matches_process(
+            command, codex_executable_path(self.app_path))
 
     def _codex_process_records(self) -> list[tuple[int, str]]:
         return [
@@ -948,8 +865,7 @@ class CdpInjector:
         return [
             (pid, command)
             for pid, command in self._codex_process_records()
-            if "--remote-debugging-port=" not in command
-            and "--remote-debugging-pipe" not in command
+            if not re.search(r"--remote-debugging-(?:port(?:=|\s)|pipe)", command)
         ]
 
     @staticmethod
@@ -1262,31 +1178,26 @@ class CdpInjector:
         return None
 
     def _launch_codex(self) -> None:
-        if sys.platform != "darwin":
-            raise InjectorError("Automatic Codex launch is currently supported on macOS only")
         app = self.app_path or discover_codex_app()
-        if app is None or not app.is_dir():
-            locations = ", ".join(CODEX_APP_CANDIDATES)
-            raise InjectorError(f"Could not find an installed Codex app (checked {locations})")
+        if app is None or not codex_executable_path(app).is_file():
+            raise InjectorError("Could not find the installed Codex desktop app; set CODEX_TASKBOARD_CODEX_APP to its executable or app bundle")
         self.app_path = app
         profile = (self.profile_path or _default_profile_path()).expanduser().resolve()
         profile.mkdir(parents=True, exist_ok=True)
-        import_codex_browser_profile(self.source_profile_path, profile)
+        try:
+            import_codex_browser_profile(self.source_profile_path, profile)
+        except Exception as exc:
+            # A locked/encrypted source profile must not prevent a clean launch.
+            # Never copy Local State encryption keys or change source permissions.
+            self._emit("warning", phase="profile-import", message=str(exc))
         command = [
-            "/usr/bin/open", "-n", "-a", str(app), "--args",
             "--remote-debugging-address=127.0.0.1",
             f"--remote-debugging-port={self.port}",
             f"--remote-allow-origins=http://127.0.0.1:{self.port}",
             f"--user-data-dir={profile}",
         ]
         try:
-            subprocess.run(
-                command,
-                check=True,
-                env=without_taskboard_launcher_environment(),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            desktop().launch(app, command, without_taskboard_launcher_environment())
         except (OSError, subprocess.CalledProcessError) as exc:
             raise InjectorError(f"Could not launch Codex: {exc}") from exc
         self.profile_path = profile
@@ -1344,6 +1255,20 @@ class CdpInjector:
     def run(self) -> int:
         targets = self._targets()
         if not targets and self.launch:
+            ordinary = self._ordinary_codex_processes()
+            if ordinary:
+                chinese = os.environ.get("CODEX_TASKBOARD_LANGUAGE", "en") == "zh-CN"
+                if not desktop().confirm_restart(self.app_path, chinese):
+                    self._emit("stopped", message="Codex restart canceled. Taskboard was not loaded")
+                    return 0
+                for pid, _ in ordinary:
+                    desktop().request_quit(self.app_path, pid)
+                deadline = time.monotonic() + 36
+                while any(desktop().process_running(pid) for pid, _ in ordinary):
+                    if self.stop_event.wait(0.1):
+                        return 0
+                    if time.monotonic() >= deadline:
+                        raise InjectorError("Codex has not exited. Taskboard was not started")
             if not self._is_port_available_for_launch():
                 self.port = _find_free_port(DEFAULT_FALLBACK_CDP_PORT)
             self._launch_codex()
@@ -1400,11 +1325,8 @@ def _default_profile_path() -> Path:
     configured = os.environ.get("CODEX_TASKBOARD_CODEX_PROFILE", "").strip()
     if configured:
         return Path(configured).expanduser().resolve()
-    if sys.platform == "darwin":
-        data_dir = os.environ.get("CODEX_TASKBOARD_DATA_DIR", "").strip()
-        if data_dir:
-            return Path(data_dir).expanduser().resolve() / "codex-profile"
-    return Path(tempfile.gettempdir()) / "codex-taskboard-codex-profile"
+    data_dir = os.environ.get("CODEX_TASKBOARD_DATA_DIR", "").strip()
+    return (Path(data_dir).expanduser().resolve() if data_dir else user_data_directory()) / "codex-profile"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1418,7 +1340,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--app-path",
         default=os.environ.get("CODEX_TASKBOARD_CODEX_APP") or None,
-        help="Optional developer override; by default discover ChatGPT.app/Codex.app automatically",
+        help="Optional developer override; by default discover the installed Codex desktop app automatically",
     )
     parser.add_argument("--injection-file", type=Path, default=DEFAULT_INJECTION_FILE)
     parser.add_argument("--profile", type=Path, default=None)
@@ -1428,6 +1350,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_standard_streams()
     args = build_parser().parse_args(argv)
     if not 1 <= args.port <= 65535:
         print("--port must be between 1 and 65535", file=sys.stderr)
@@ -1443,6 +1366,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     signal.signal(signal.SIGINT, injector.stop)
     signal.signal(signal.SIGTERM, injector.stop)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, injector.stop)
     try:
         return injector.run()
     except InjectorError as exc:

@@ -325,11 +325,11 @@ dependencies = [
 name = "codex-taskboard"
 version = "0.1.0"
 dependencies = [
- "libc",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-shell",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
