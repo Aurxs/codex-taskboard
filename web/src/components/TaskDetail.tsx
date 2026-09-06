@@ -6,7 +6,7 @@ import { AttachmentPreview } from "./AttachmentPreview";
 import { AttachmentButton, pastedFiles, readAttachments, validateAttachments } from "./AttachmentButton";
 import { DependencyPicker } from "./DependencyPicker";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ActivityItem, ExecutionOptions, Interaction, Task, TaskPriority, TaskStatus } from "../types";
+import type { ActivityItem, Interaction, Task, TaskPriority, TaskStatus } from "../types";
 import { PRIORITY_LABELS, RUN_STATE_LABELS, STATUS_LABELS, TASK_PRIORITIES } from "../types";
 import { LinearIcon } from "./LinearIcon";
 import { PriorityIcon, ProjectIcon, StatusIcon } from "./SemanticIcons";
@@ -106,12 +106,9 @@ export function TaskDetail({
   const [followup, setFollowup] = useState("");
   const [sending, setSending] = useState(false);
   const [threadInput, setThreadInput] = useState("");
-  const [settingsDraft, setSettingsDraft] = useState<ExecutionOptions | null>(null);
   const [parentTask, setParentTask] = useState<Task | null>(null);
   useEffect(() => { let active = true; if (task.parentId) void getTask(task.parentId).then(parent => { if (active) setParentTask(parent); }).catch(() => {}); else setParentTask(null); return () => { active = false; }; }, [task.parentId, task.version]);
-  useEffect(() => { setSettingsDraft(null); }, [task.id]);
   const [worktreeInput, setWorktreeInput] = useState("");
-  const [executionPickerOpen, setExecutionPickerOpen] = useState(false);
   const isGroup = current.kind === "parallel_group";
   const managed = !!current.parallel?.managed;
   const paused = !!current.parallel?.paused;
@@ -258,10 +255,8 @@ export function TaskDetail({
               {current.operations?.filter(op => op.kind === "merge" && op.payload.threadId && op.state !== "completed").map(op => <button key={op.id} type="button" className="detail-copy-action" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: op.payload.threadId } })}>{t("打开合并会话")}</button>)}
             </div>
             <div className="issue-property-list"><button className="detail-property-row" type="button"><span>{t("编号")}</span><strong>{current.identifier}</strong></button><div className="detail-property-row"><span>{t("状态")}</span><strong>{current.status === "canceled" ? t("已取消") : STATUS_LABELS[current.status as TaskStatus] ?? current.status}</strong></div><div className="detail-property-row"><span>{t("优先级")}</span><strong>{PRIORITY_LABELS[current.priority]}</strong></div><div className="detail-property-row"><span>{t("更新")}</span><strong>{relativeTime(current.updatedAt)}</strong></div><div className="detail-property-row"><span>{t("运行阶段")}</span><strong>{current.runState ? RUN_STATE_LABELS[current.runState] : "—"}</strong></div></div>
-            {!current.parentId && <TaskPropertyPicker ariaLabel={t("执行方式")} value={current.schedulingMode ?? "exclusive"} open={executionPickerOpen} onOpenChange={setExecutionPickerOpen} disabled={!!current.threadId || !!current.worktreePath || saving}
-              options={[{ value: "exclusive", label: t("独占执行") }, { value: "parallel", label: t("允许并行") }]} onChange={value => void save({ schedulingMode: value === "parallel" ? "parallel" : "exclusive" })} />}
-            <ExecutionSettings defaultTarget={current.parallel?.defaultTarget as string ?? null} scopeSummary={isGroup ? [...new Set(current.children?.flatMap(child => child.writeScopes ?? []) ?? [])] : undefined} value={settingsDraft ?? current} isChild={!!current.parentId} workspaceLocked={!!current.threadId || !!current.worktreePath} disabled={saving || (current.status === "in_progress" && !paused)} onChange={setSettingsDraft} />
-            {settingsDraft && <button className="detail-copy-action" type="button" disabled={saving} onClick={() => { void save(settingsDraft).then(next => { if (next) setSettingsDraft(null); }); }}>{t("保存设置")}</button>}
+            <ExecutionSettings key={current.id} defaultTarget={current.parallel?.defaultTarget as string ?? null} scopeSummary={isGroup ? [...new Set(current.children?.flatMap(child => child.writeScopes ?? []) ?? [])] : undefined} value={current} isChild={!!current.parentId} workspaceLocked={!!current.threadId || !!current.worktreePath || !!current.parallel?.baseCommit} disabled={saving || (current.status === "in_progress" && !paused)} onChange={async changes => !!await save(changes)} />
+            {current.status === "in_progress" && !paused && <small className="settings-note">{t("暂停任务后可修改；下次执行生效。")}</small>}
             {current.worktreePath && <small className="task-worktree-path">{current.worktreePath}</small>}
             {managed && <details className="merge-history"><summary>{t("合入记录")} · {(current.operations ?? []).filter(op => op.kind === "merge").length}</summary>
               <p>{t("合入目标")} <code>{current.targetBranch ?? "—"}</code></p>

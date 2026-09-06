@@ -58,6 +58,8 @@ export const en = {
   "已有会话 ID": "Existing thread ID",
   "关联已有会话": "Link existing thread",
   "保存设置": "Save settings",
+  "设置未保存，请重试。": "Settings were not saved. Please try again.",
+  "正在保存…": "Saving…",
   "已排队": "Queued",
   "等待合入": "Waiting to merge",
   "沿用任务组": "Inherit from group",

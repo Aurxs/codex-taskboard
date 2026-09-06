@@ -13,12 +13,13 @@ try {
   let syncs = 0;
   let submitted = null;
   let failSave = false;
+  const patches = [];
   const tasks = Array.from({ length: 16 }, (_, i) => ({ id: `task-${i}`, projectId: 'db-0', identifier: `CODEX-TASKBOARD-${i + 1}`, title: `前置任务 ${i + 1}`, description: '', status: 'todo', priority: 'none', version: 1, blockedBy: [], blocks: [], ready: true }));
   tasks[0].activity = Array.from({ length: 15 }, (_, i) => ({ id: `event-${i}`, kind: i === 1 ? 'mcpToolCall' : 'agentMessage', message: i === 1 ? 'imagegen' : `过程反馈 ${i + 1}：${'这是一段应当自动换行且不挤压时间的执行进展。'.repeat(6)}`, status: 'completed', createdAt: new Date(Date.now() - 120000).toISOString(), ...(i === 1 ? { data: { tool: 'imagegen', arguments: { prompt: '一棵树' } } } : {}) }));
   tasks.push({ ...tasks[0], id: 'canceled-1', identifier: 'CANCELED-1', title: '已取消的示例任务', status: 'canceled' });
   await page.route('http://127.0.0.1:47825/**', async route => {
     const url = new URL(route.request().url());
-    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, OPTIONS' };
+    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET, POST, PATCH, OPTIONS' };
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 200, headers });
     if (url.pathname === '/api/codex/projects/sync') {
       syncs++;
@@ -33,6 +34,7 @@ try {
     }
     if (url.pathname.startsWith('/api/tasks/') && route.request().method() === 'PATCH') {
       submitted = route.request().postDataJSON();
+      patches.push(submitted);
       if (failSave) return route.fulfill({ headers, status: 409, json: { error: 'Conflict' } });
       Object.assign(tasks[0], submitted, { version: tasks[0].version + 1 });
       return route.fulfill({ headers, json: tasks[0] });
@@ -84,6 +86,99 @@ try {
   await ui.locator('.issue-description-read').waitFor();
   assert.equal(tasks[0].description, '描述草稿不能被同步覆盖');
   assert.equal(submitted.title, undefined, 'description saves must not overwrite title');
+  // Detail properties persist immediately; text stays local until Apply/Enter.
+  const settings = ui.locator('.detail-execution-settings');
+  const row = name => settings.getByRole('button', { name: new RegExp(`^${name}：`) });
+  const dialog = ui.locator('.detail-settings-popover');
+  const pick = async (name, choice, changes) => {
+    await row(name).click();
+    await dialog.getByRole('option', { name: choice, exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    const { version, ...fields } = patches.at(-1);
+    assert.deepEqual(fields, changes, 'only the changed property and dependent values are patched');
+  };
+  const beforeSettings = await settings.boundingBox();
+  await row('模型').click();
+  assert.deepEqual(await settings.boundingBox(), beforeSettings, 'opening a picker does not reflow the sidebar');
+  await dialog.getByRole('option', { name: 'gpt-6-astra', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.equal(tasks[0].model, 'gpt-6-astra');
+  assert.equal(tasks[0].reasoningEffort, 'low');
+  assert.match(await row('模型').getAttribute('aria-label'), /gpt-6-astra/);
+  await pick('推理强度', '高 · high', { reasoningEffort: 'high' });
+  await pick('执行位置', '新工作树', { executionMode: 'worktree', branch: null });
+  await row('起始分支').click();
+  await dialog.getByRole('textbox').fill(' main ');
+  const beforeDraft = patches.length;
+  await dialog.getByRole('textbox').press('Enter');
+  await dialog.waitFor({ state: 'hidden' });
+  assert.equal(tasks[0].branch, 'main');
+  assert.equal(patches.length, beforeDraft + 1);
+  await row('修改范围').click();
+  const scopes = dialog.getByRole('textbox', { name: '修改范围' });
+  await page.frames()[1].waitForFunction(() => document.activeElement?.tagName === 'TEXTAREA' && document.activeElement.closest('.detail-settings-popover'));
+  await scopes.fill(' web/\nweb/\n src/ ');
+  const beforeScope = patches.length;
+  await refresh();
+  assert.equal(await scopes.inputValue(), ' web/\nweb/\n src/ ');
+  assert.equal(patches.length, beforeScope, 'typing and live refresh must not submit partial input');
+  failSave = true;
+  await dialog.getByRole('button', { name: '应用', exact: true }).click();
+  await dialog.getByRole('alert').waitFor();
+  assert.equal(await scopes.inputValue(), ' web/\nweb/\n src/ ');
+  assert.match(await row('修改范围').getAttribute('aria-label'), /未指定/);
+  failSave = false;
+  await dialog.getByRole('button', { name: '应用', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.deepEqual(tasks[0].writeScopes, ['web/', 'src/']);
+  assert.deepEqual(Object.keys(patches.at(-1)).sort(), ['version', 'writeScopes']);
+  await pick('执行方式', '允许并行', { schedulingMode: 'parallel' });
+  assert.equal(await row('执行位置').isDisabled(), true);
+  await row('合入目标').click();
+  await dialog.getByRole('textbox').fill('release');
+  await dialog.getByRole('button', { name: '应用', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.equal(tasks[0].targetBranch, 'release');
+  await row('模型').click();
+  await dialog.getByRole('button', { name: '恢复默认', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.equal(tasks[0].model, null);
+  assert.equal(tasks[0].reasoningEffort, null);
+  assert.equal(await row('推理强度').isDisabled(), true);
+  await row('修改范围').click();
+  const beforeCancel = patches.length;
+  await scopes.fill('discarded/');
+  await scopes.press('Escape');
+  await dialog.waitFor({ state: 'hidden' });
+  await row('修改范围').click();
+  assert.equal(await scopes.inputValue(), 'web/\nsrc/');
+  await ui.locator('.activity-heading').click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.equal(patches.length, beforeCancel);
+  await ui.locator('.issue-detail').getByRole('button', { name: '返回议题看板', exact: true }).click();
+  await ui.locator('.task-card').first().click();
+  assert.match(await row('修改范围').getAttribute('aria-label'), /web\/, src\//);
+  assert.match(await row('执行方式').getAttribute('aria-label'), /允许并行/);
+  for (const width of [1200, 600]) {
+    await page.evaluate(width => { document.querySelector('iframe').style.width = `${width}px`; }, width);
+    await row('修改范围').click();
+    const bounds = await ui.locator('.taskboard-popover').boundingBox();
+    const frameBounds = await page.locator('iframe').boundingBox();
+    assert.ok(bounds.x >= frameBounds.x && bounds.x + bounds.width <= frameBounds.x + width, 'popover fits the frame');
+    await mkdir('output/playwright', { recursive: true });
+    await page.screenshot({ path: `output/playwright/detail-settings-${width}.png` });
+    await scopes.press('Escape');
+  }
+  await page.evaluate(() => { document.querySelector('iframe').style.width = '1200px'; });
+  tasks[0].threadId = 'existing-thread';
+  await refresh();
+  assert.equal(await row('执行方式').isDisabled(), true);
+  assert.equal(await row('起始分支').isDisabled(), true);
+  assert.equal(await row('合入目标').isDisabled(), true);
+  tasks[0].status = 'in_progress';
+  await refresh();
+  assert.equal(await row('模型').isDisabled(), true);
+  assert.equal(await row('修改范围').isDisabled(), true);
   const nav = ui.locator('.issue-detail > .issue-parent-link');
   const before = await nav.boundingBox();
   await ui.locator('.issue-detail-scroll').evaluate(el => { el.scrollTop = el.scrollHeight; });
@@ -95,7 +190,7 @@ try {
   await page.frames()[1].evaluate(() => window.testStream.onopen());
   await ui.locator('.board-sync-indicator').waitFor({ state: 'hidden' });
   assert.deepEqual(errors, []);
-  console.log('PASS: draft preservation, failed-save retry, independent field saves, fixed navigation, silent sync and connection recovery');
+  console.log('PASS: detail property auto-save, partial patches, failed-save retry, persisted reopen, popup layout/dismissal, workspace locks, draft preservation, failed-save retry, independent field saves, fixed navigation, silent sync and connection recovery');
 } finally {
   await browser.close();
 }

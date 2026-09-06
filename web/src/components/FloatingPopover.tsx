@@ -63,8 +63,12 @@ export function FloatingPopover({ open, anchor, onClose, children, label, width 
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     window.visualViewport?.addEventListener("resize", place);
-    popup.querySelector<HTMLElement>('input:not([type="checkbox"]), [aria-selected="true"], [data-popover-item]')?.focus({ preventScroll: true });
+    // Positioning first reveals the portal; hidden inputs cannot receive focus.
+    const focusFrame = requestAnimationFrame(() => {
+      popup.querySelector<HTMLElement>('input:not([type="checkbox"]):not(:disabled), textarea:not(:disabled), [aria-selected="true"]:not(:disabled), [data-popover-item]:not(:disabled)')?.focus({ preventScroll: true });
+    });
     return () => {
+      cancelAnimationFrame(focusFrame);
       observer.disconnect();
       document.removeEventListener("pointerdown", outside, true);
       document.removeEventListener("focusin", outside);
