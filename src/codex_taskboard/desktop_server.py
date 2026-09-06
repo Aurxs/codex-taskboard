@@ -6,6 +6,7 @@ no synthetic notifications or changes to the native conversation UI are needed.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Any
 
 from .app_server import AppServerUnavailable, CodexAppServer, RpcFailure, usage_error_info
@@ -52,6 +53,21 @@ class DesktopAppServer(CodexAppServer):
                 raise UsageLimitExceeded(error.get("message", "Usage limit exceeded"), error=error)
             raise RpcFailure(error.get("code"), error.get("message", "Codex request failed"), error.get("data"))
         return response.get("result")
+
+    async def create_worktree(self, workspace_path: str, branch: str | None) -> dict[str, str]:
+        result = await self.request("desktop/worktree-create-managed", {
+            "hostId": "local", "cwd": workspace_path,
+            "startingState": {"type": "branch", "branchName": branch} if branch else {"type": "working-tree"},
+            "localEnvironmentConfigPath": None, "streamId": str(uuid.uuid4()),
+        }, timeout=300)
+        if not isinstance(result, dict) or not all(isinstance(result.get(key), str) and result[key] for key in ("worktreeWorkspaceRoot", "worktreeGitRoot")):
+            raise AppServerUnavailable("Codex 未返回工作树路径，请在 Codex 中检查工作树")
+        return result
+
+    async def set_worktree_owner(self, git_root: str, thread_id: str) -> None:
+        await self.request("desktop/worktree-set-owner-thread", {
+            "hostId": "local", "worktree": git_root, "conversationId": thread_id,
+        }, timeout=30)
 
     async def respond(self, request_id, *, result=None, error=None) -> None:
         if self.transport is None:

@@ -1,5 +1,13 @@
 // Chinese source strings are stable message keys; placeholders are positional.
 export const en = {
+  "执行位置": "Run in",
+  "当前项目目录": "Current project directory",
+  "新工作树": "New worktree",
+  "起始分支": "Starting branch",
+  "留空使用当前工作区状态": "Leave empty to use the current working tree",
+  "由 Codex 创建并管理工作树；可填写已有本地或远程分支，任务在该分支的独立工作树中执行。": "Codex creates and manages the worktree. Enter an existing local or remote branch to start an isolated worktree from it.",
+  "执行位置和分支已锁定，重试将沿用原会话。": "Run location and branch are locked. Retries reuse the original conversation.",
+
   "请求失败，请重试。": "Request failed. Please try again.",
   "切换项目": "Switch project",
   "等待 Codex 项目": "Waiting for a Codex project",

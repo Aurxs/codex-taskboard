@@ -216,6 +216,30 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
             })
             self.assertEqual(self.db.get_task(task["id"])["status"], "in_review")
 
+    async def test_worktree_survives_thread_start_failure_and_reuses_on_resume(self):
+        project = self.project()
+        task = self.db.create_task(project_id=project["id"], title="Isolated", execution_mode="worktree", branch="main")
+        self.db.claim_task(task["id"], task["version"])
+        self.server.create_worktree = AsyncMock(return_value={
+            "worktreeWorkspaceRoot": "/isolated/subdir", "worktreeGitRoot": "/isolated",
+        })
+        self.server.set_worktree_owner = AsyncMock()
+        self.server.start_thread = AsyncMock(side_effect=[RuntimeError("disconnected"), "thread-isolated"])
+        await self.scheduler._execute_task(task["id"], None)
+        failed = self.db.get_task(task["id"])
+        self.assertEqual(failed["worktreePath"], "/isolated/subdir")
+        self.assertIsNone(failed["threadId"])
+        await self.scheduler._execute_task(task["id"], None)
+        self.server.create_worktree.assert_awaited_once_with(project["workspacePath"], "main")
+        self.server.start_thread.assert_awaited_with("/isolated/subdir")
+        self.server.set_worktree_owner.assert_awaited_with("/isolated", "thread-isolated")
+        completed = self.db.get_task(task["id"])
+        self.db.update_task(task["id"], completed["version"], status="in_progress")
+        await self.scheduler._execute_task(task["id"], "Continue")
+        self.assertEqual(self.server.start_thread.await_count, 2)
+        self.assertEqual(self.server.create_worktree.await_count, 1)
+        self.assertEqual(self.server.resume_calls, ["thread-isolated"])
+
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.db = Database(f"{self.temp_dir.name}/taskboard.sqlite3")

@@ -364,7 +364,7 @@ function EmbeddedTaskboard() {
     setDetail((current) => current?.id === next.id && next.version >= current.version ? next : current);
   }, []);
 
-  const updateTaskResource = useCallback(async (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">> & { attachments?: import("./types").AttachmentInput[] })) => {
+  const updateTaskResource = useCallback(async (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch">> & { attachments?: import("./types").AttachmentInput[] })) => {
     try {
       const next = await updateTask(task.id, task.version, changes);
       updateTaskInState(next);

@@ -70,3 +70,38 @@ class ExecutionOptionsTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await app.state.scheduler.stop()
                 app.state.db.close()
+
+    async def test_worktree_settings_persist_and_lock_after_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(data_dir=directory, db_path=f"{directory}/db.sqlite3", codex_command=["unused"])
+            db = app.state.db
+            try:
+                project = db.create_project(key="W", name="Worktree", workspace_path=directory)
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+                    path = f"/api/projects/{project['id']}/tasks"
+                    invalid = await client.post(path, json={"title": "Invalid", "branch": "main"})
+                    self.assertEqual(invalid.status_code, 422)
+                    response = await client.post(path, json={"title": "Isolated", "executionMode": "worktree", "branch": "origin/main"})
+                    self.assertEqual(response.status_code, 201, response.text)
+                    task = response.json()
+                    reopened = Database(f"{directory}/db.sqlite3")
+                    self.assertEqual(reopened.get_task(task["id"])["branch"], "origin/main")
+                    reopened.close()
+                    response = await client.patch(f"/api/tasks/{task['id']}", json={"version": task["version"], "branch": None})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    task = db.claim_task(task["id"], response.json()["version"])
+                    response = await client.patch(f"/api/tasks/{task['id']}", json={"version": task["version"], "branch": "main"})
+                    self.assertEqual(response.status_code, 422)
+                    task = db.update_task(task["id"], task["version"], status="todo", worktree_path="/isolated")
+                    response = await client.patch(f"/api/tasks/{task['id']}", json={"version": task["version"], "executionMode": "local"})
+                    self.assertEqual(response.status_code, 422)
+                    response = await client.patch(f"/api/tasks/{task['id']}", json={"version": task["version"], "executionMode": "worktree", "branch": None, "title": "Still editable"})
+                    self.assertEqual(response.status_code, 200, response.text)
+            finally:
+                await app.state.scheduler.stop()
+                db.close()
+
+    async def test_worktree_requires_desktop_connection(self):
+        from codex_taskboard.app_server import AppServerUnavailable
+        with self.assertRaises(AppServerUnavailable):
+            await CodexAppServer(["unused"]).create_worktree("/project", "main")

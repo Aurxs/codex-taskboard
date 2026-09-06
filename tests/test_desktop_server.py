@@ -7,6 +7,26 @@ from codex_taskboard.app_server import RpcFailure
 
 
 class DesktopServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_worktree_uses_native_managed_creation_and_owner(self):
+        server = DesktopAppServer()
+        server.transport = Mock(return_value={"result": {
+            "worktreeWorkspaceRoot": "/worktree/subdir", "worktreeGitRoot": "/worktree",
+        }})
+        await server.start()
+        for branch in (None, "origin/main"):
+            result = await server.create_worktree("/project/subdir", branch)
+            method, params, timeout = server.transport.call_args.args
+            self.assertEqual(method, "desktop/worktree-create-managed")
+            self.assertEqual(params["cwd"], "/project/subdir")
+            self.assertEqual(params["startingState"], {"type": "branch", "branchName": branch} if branch else {"type": "working-tree"})
+            self.assertNotIn("sandboxPolicy", params)
+            self.assertEqual(result["worktreeWorkspaceRoot"], "/worktree/subdir")
+        await server.set_worktree_owner("/worktree", "thread-1")
+        self.assertEqual(server.transport.call_args.args[:2], ("desktop/worktree-set-owner-thread", {
+            "hostId": "local", "worktree": "/worktree", "conversationId": "thread-1",
+        }))
+        await server.stop()
+
     async def test_transport_uses_native_service_and_does_not_spawn_or_stop_it(self):
         server = DesktopAppServer(notification_handler=AsyncMock())
         server.transport = Mock(return_value={"result": {"turn": {"id": "turn-1"}}})

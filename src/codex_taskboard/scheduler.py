@@ -786,13 +786,21 @@ class Scheduler:
             thread_id = task["threadId"]
             resuming = bool(thread_id)
             if not thread_id:
-                thread_id = await self.server.start_thread(project["workspacePath"])
+                if task.get("executionMode") == "worktree" and not task.get("worktreePath"):
+                    worktree = await self.server.create_worktree(project["workspacePath"], task.get("branch"))
+                    task = await self._set_task(task_id, worktree_path=worktree["worktreeWorkspaceRoot"],
+                                                worktree_git_root=worktree["worktreeGitRoot"]) or self.db.get_task(task_id)
+                if task["status"] != TaskStatus.IN_PROGRESS.value:
+                    return
+                thread_id = await self.server.start_thread(task.get("worktreePath") or project["workspacePath"])
                 self.server.register_thread_task(thread_id, task_id)
                 task = await self._set_task(task_id, thread_id=thread_id) or self.db.get_task(task_id)
             else:
                 self.server.register_thread_task(thread_id, task_id)
                 if resuming:
                     await self.server.resume_thread(thread_id)
+            if task.get("worktreeGitRoot"):
+                await self.server.set_worktree_owner(task["worktreeGitRoot"], thread_id)
             task = self.db.get_task(task_id)
             if task["status"] != TaskStatus.IN_PROGRESS.value:
                 return

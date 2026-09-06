@@ -12142,3 +12142,6 @@ button.attachment-link { width: 100%; border: 0; background: transparent; text-a
   margin: 0;
   padding: 12px 28px;
 }
+
+.execution-setting-field input { min-width: 0; width: 100%; padding: 6px 8px; border: 1px solid var(--border-color, #ddd); border-radius: 6px; color: inherit; background: transparent; font: inherit; }
+.task-worktree-path { display: block; overflow-wrap: anywhere; opacity: .7; }

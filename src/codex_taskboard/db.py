@@ -25,7 +25,7 @@ from typing import Any, Iterator
 from .constants import ALL_PRIORITIES, ALL_STATUSES, Priority, TaskStatus
 from .errors import ConflictError, NotFoundError, ValidationError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 _UNSET = object()
 _KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 _KEY_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_-]+")
@@ -239,6 +239,15 @@ class Database:
                 self._conn.execute("UPDATE tasks SET completed_at = updated_at WHERE status = 'done'")
                 self._conn.execute("UPDATE schema_meta SET version = 6 WHERE singleton = 1")
             current = 6
+        if current < 7:
+            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(tasks)")}
+            for name, definition in (("execution_mode", "TEXT NOT NULL DEFAULT 'local'"),
+                                     ("branch", "TEXT"), ("worktree_path", "TEXT"),
+                                     ("worktree_git_root", "TEXT")):
+                if name not in columns:
+                    self._conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
+            self._conn.execute("UPDATE schema_meta SET version = 7 WHERE singleton = 1")
+            current = 7
         if current != SCHEMA_VERSION:
             raise RuntimeError(f"No migration path from schema {current}")
 
@@ -311,6 +320,10 @@ class Database:
             "priority": row["priority"],
             "model": row["model"],
             "reasoningEffort": row["reasoning_effort"],
+            "executionMode": row["execution_mode"],
+            "branch": row["branch"],
+            "worktreePath": row["worktree_path"],
+            "worktreeGitRoot": row["worktree_git_root"],
             "status": row["status"],
             "version": int(row["version"]),
             "threadId": row["thread_id"],
@@ -689,7 +702,10 @@ class Database:
         attachments: list[dict[str, str]] | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        execution_mode: str = "local",
+        branch: str | None = None,
     ) -> dict[str, Any]:
+        self._validate_workspace_options(execution_mode, branch)
         title = title.strip()
         description = description or ""
         if not title:
@@ -714,11 +730,11 @@ class Database:
             self._conn.execute(
                 """
                 INSERT INTO tasks (
-                    id, identifier, project_id, title, description, priority, model, reasoning_effort,
+                    id, identifier, project_id, title, description, priority, model, reasoning_effort, execution_mode, branch,
                     status, version, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'todo', 1, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', 1, ?, ?)
                 """,
-                (task_id, identifier, project_id, title, description, priority, model, reasoning_effort, now, now),
+                (task_id, identifier, project_id, title, description, priority, model, reasoning_effort, execution_mode, branch, now, now),
             )
             self._conn.executemany("INSERT INTO task_attachments(id, task_id, name, content) VALUES (?, ?, ?, ?)",
                                    [(aid, task_id, name, content) for aid, name, content in prepared])
@@ -770,6 +786,16 @@ class Database:
         paths = [str(self.attachment_path(item["id"])) for item in task["attachments"]]
         return "\n\nTask attachments (read the documents or view the images):\n" + "\n".join(paths) if paths else ""
 
+    @staticmethod
+    def _validate_workspace_options(mode: str, branch: str | None) -> None:
+        if mode not in {"local", "worktree"}:
+            raise ValidationError("Invalid execution mode")
+        if branch is not None:
+            if not isinstance(branch, str) or not branch.strip() or branch != branch.strip() or branch.startswith("-"):
+                raise ValidationError("Invalid branch")
+            if mode != "worktree":
+                raise ValidationError("选择分支需要使用新工作树")
+
     def update_task(
         self,
         task_id: str,
@@ -780,6 +806,10 @@ class Database:
         priority: str | object = _UNSET,
         model: str | None | object = _UNSET,
         reasoning_effort: str | None | object = _UNSET,
+        execution_mode: str | object = _UNSET,
+        branch: str | None | object = _UNSET,
+        worktree_path: str | None | object = _UNSET,
+        worktree_git_root: str | None | object = _UNSET,
         thread_id: str | None | object = _UNSET,
         status: str | object = _UNSET,
         run_state: str | None | object = _UNSET,
@@ -788,6 +818,18 @@ class Database:
         attachments: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         values: dict[str, Any] = {}
+        if execution_mode is not _UNSET or branch is not _UNSET:
+            current = self.get_task(task_id)
+            mode = current["executionMode"] if execution_mode is _UNSET else execution_mode
+            ref = current["branch"] if branch is _UNSET else branch
+            self._validate_workspace_options(mode, ref)
+            if (mode, ref) != (current["executionMode"], current["branch"]):
+                if current["status"] == "in_progress" or current["threadId"] or current["worktreePath"]:
+                    raise ValidationError("任务启动后不能修改执行位置或分支，请创建新任务")
+                values.update(execution_mode=mode, branch=ref)
+        for key, value in (("worktree_path", worktree_path), ("worktree_git_root", worktree_git_root)):
+            if value is not _UNSET:
+                values[key] = value
         if title is not _UNSET:
             assert isinstance(title, str)
             title = title.strip()
@@ -1105,6 +1147,10 @@ class Database:
         task_id: str,
         *,
         run_state: str | object = _UNSET,
+        execution_mode: str | object = _UNSET,
+        branch: str | None | object = _UNSET,
+        worktree_path: str | None | object = _UNSET,
+        worktree_git_root: str | None | object = _UNSET,
         thread_id: str | None | object = _UNSET,
         turn_id: str | None | object = _UNSET,
         structured_error: Any = _UNSET,

@@ -114,6 +114,9 @@ function normalizeTask(value: unknown): Task {
     description: String(item.description ?? ""),
     attachments: (item.attachments ?? []) as Task["attachments"],
     model: item.model == null ? null : String(item.model),
+    executionMode: item.executionMode === "worktree" ? "worktree" : "local",
+    branch: item.branch == null ? null : String(item.branch),
+    worktreePath: item.worktreePath == null ? null : String(item.worktreePath),
     reasoningEffort: item.reasoningEffort == null ? null : String(item.reasoningEffort),
     priority: (item.priority ?? "none") as TaskPriority,
     status: (item.status ?? "todo") as Task["status"],
@@ -226,7 +229,7 @@ export async function getTask(id: string): Promise<Task> {
 
 export async function createTask(
   projectId: string,
-  input: { title: string; description: string; priority: TaskPriority; blockedByIds?: string[]; attachments?: AttachmentInput[]; model?: string | null; reasoningEffort?: string | null },
+  input: { title: string; description: string; priority: TaskPriority; blockedByIds?: string[]; attachments?: AttachmentInput[]; model?: string | null; reasoningEffort?: string | null; executionMode?: "local" | "worktree"; branch?: string | null },
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/projects/${encodeURIComponent(projectId)}/tasks`, {
     method: "POST",
@@ -237,7 +240,7 @@ export async function createTask(
 export async function updateTask(
   id: string,
   version: number,
-  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">> & { attachments?: import("./types").AttachmentInput[] }),
+  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch">> & { attachments?: import("./types").AttachmentInput[] }),
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: "PATCH",

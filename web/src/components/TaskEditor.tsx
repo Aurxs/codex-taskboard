@@ -30,7 +30,7 @@ export function TaskEditor({
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? "none");
   const [blockedByIds, setBlockedByIds] = useState<string[]>(task?.blockedBy.map((item) => item.id) ?? []);
-  const [execution, setExecution] = useState<ExecutionOptions>({ model: task?.model ?? null, reasoningEffort: task?.reasoningEffort ?? null });
+  const [execution, setExecution] = useState<ExecutionOptions>({ model: task?.model ?? null, reasoningEffort: task?.reasoningEffort ?? null, executionMode: task?.executionMode ?? "local", branch: task?.branch ?? null });
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +83,7 @@ export function TaskEditor({
             <AttachmentButton count={(task?.attachments?.length ?? 0) + files.length} disabled={saving} onAdd={addFiles} />
           </div>
           {priority === "draft" && <p className="composer-draft-note">{t("草稿不会被 Codex 认领，修改优先级后即可发布。")}</p>}
-          <ExecutionSettings value={execution} onChange={setExecution} />
+          <ExecutionSettings saveBranchOnBlur={false} value={execution} onChange={setExecution} workspaceLocked={!!task?.threadId || !!task?.worktreePath} disabled={saving || task?.status === "in_progress"} />
           {error && <p className="form-error" role="alert">{localizeError(error)}</p>}
         </div>
         <footer className="dialog-footer"><span className="keyboard-note">{task ? t("保存更改") : t("创建后可拖动调整状态")}</span><div className="dialog-actions"><button className="button secondary" type="button" onClick={onClose} disabled={saving}>{t("取消")}</button><button className="button primary" type="submit" disabled={saving}>{saving ? t("保存中…") : task ? t("保存更改") : priority === "draft" ? t("保存草稿") : t("创建任务")}</button></div></footer>

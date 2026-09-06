@@ -716,6 +716,24 @@ class CdpInjector:
         request_id = f"taskboard-{secrets.token_hex(16)}"
         if method is None:
             expression = f"window.electronBridge.sendMessageFromView({json.dumps({'type': 'mcp-response', 'hostId': 'local', 'response': params})})"
+        elif method in {"desktop/worktree-create-managed", "desktop/worktree-set-owner-thread"}:
+            message = {"type": "fetch", "requestId": request_id, "method": "POST",
+                       "url": f"vscode://codex/{method.removeprefix('desktop/')}",
+                       "body": json.dumps(params)}
+            expression = f"""new Promise((resolve) => {{
+              const id = {json.dumps(request_id)};
+              const finish = (value) => {{ clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); }};
+              const receive = ({self._native_decoder})((data) => {{
+                if (data?.type !== 'fetch-response' || data.requestId !== id) return;
+                if (data.responseType === 'error') finish({{error: {{message: data.error || 'Codex worktree request failed'}}}});
+                else {{ try {{ finish({{result: JSON.parse(data.bodyJsonString || 'null')}}); }}
+                       catch (_) {{ finish({{error: {{message: 'Invalid Codex worktree response'}}}}); }} }}
+              }});
+              const timer = setTimeout(() => finish({{error: {{message: 'Codex 工作树响应超时，请在 Codex 中检查工作树后再重试'}}}}), {int(timeout * 1000)});
+              window.addEventListener('message', receive);
+              try {{ Promise.resolve(window.electronBridge.sendMessageFromView({json.dumps(message)})).catch(error => finish({{error: {{message: String(error)}}}})); }}
+              catch (error) {{ finish({{error: {{message: String(error)}}}}); }}
+            }})"""
         else:
             message = {"type": "mcp-request", "hostId": "local", "request": {
                 "id": request_id, "method": method, "params": params}}

@@ -115,7 +115,7 @@ export function TaskDetail({
   task: Task;
   tasks: Task[];
   onBack: () => void;
-  onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">> & { attachments?: import("../types").AttachmentInput[] })) => Promise<Task | null>;
+  onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch">> & { attachments?: import("../types").AttachmentInput[] })) => Promise<Task | null>;
   onDependencies: (task: Task, ids: string[]) => Promise<Task | null>;
   onAction: (task: Task, action: "run" | "retry" | "interrupt_requeue" | "submit_review_feedback" | "complete" | "cancel" | "follow_up", feedback?: string, targetStatus?: "in_review" | "done") => Promise<Task | null>;
   onResolveInteraction: (interaction: Interaction, response: unknown) => Promise<void>;
@@ -176,7 +176,7 @@ export function TaskDetail({
   }, [task]);
 
   const pendingInteractions = useMemo(() => (current.interactions ?? []).filter((interaction) => interaction.status === "pending"), [current.interactions]);
-  async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort">> & { attachments?: import("../types").AttachmentInput[] })) {
+  async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch">> & { attachments?: import("../types").AttachmentInput[] })) {
     setSaving(true);
     try {
       const next = await onUpdate(current, changes);
@@ -257,7 +257,8 @@ export function TaskDetail({
               {current.status === "in_review" && <><button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "complete")}><LinearIcon name="check" />{t("接受并完成")}</button><textarea className="review-feedback-input" rows={3} value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder={t("审阅未通过时填写反馈…")} /><button className="detail-copy-action" type="button" disabled={!feedback.trim()} onClick={() => { void onAction(current, "submit_review_feedback", feedback.trim()); setFeedback(""); }}>{t("退回修改")}</button></>}
             </div>
             <div className="issue-property-list"><button className="detail-property-row" type="button"><span>{t("编号")}</span><strong>{current.identifier}</strong></button><div className="detail-property-row"><span>{t("状态")}</span><strong>{current.status === "canceled" ? t("已取消") : STATUS_LABELS[current.status as TaskStatus] ?? current.status}</strong></div><div className="detail-property-row"><span>{t("优先级")}</span><strong>{PRIORITY_LABELS[current.priority]}</strong></div><div className="detail-property-row"><span>{t("更新")}</span><strong>{relativeTime(current.updatedAt)}</strong></div><div className="detail-property-row"><span>{t("运行阶段")}</span><strong>{current.runState ? RUN_STATE_LABELS[current.runState] : "—"}</strong></div></div>
-            <ExecutionSettings value={current} disabled={saving || current.status === "in_progress"} onChange={value => void save(value)} />
+            <ExecutionSettings value={current} workspaceLocked={!!current.threadId || !!current.worktreePath} disabled={saving || current.status === "in_progress"} onChange={value => void save(value)} />
+            {current.worktreePath && <small className="task-worktree-path">{current.worktreePath}</small>}
             <IssueRelations task={current} candidates={tasks} onChange={(ids) => void dependencyChange(ids)} />
             {(current.status === "todo" || current.status === "in_review") && <button className="detail-copy-action detail-cancel-action" type="button" onClick={() => { if (window.confirm(t("确定取消这个任务吗？"))) void onAction(current, "cancel"); }}>{t("取消任务")}</button>}
           </aside>

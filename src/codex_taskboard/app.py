@@ -70,6 +70,8 @@ class VersionBody(StrictModel):
 
 
 class TaskExecutionBody(StrictModel):
+    executionMode: Literal["local", "worktree"] = "local"
+    branch: str | None = Field(default=None, min_length=1, max_length=255)
     model: str | None = Field(default=None, min_length=1, max_length=200)
     reasoningEffort: str | None = Field(default=None, min_length=1, max_length=40)
 
@@ -354,6 +356,8 @@ def create_app(
     async def create_task(project_id: str, body: TaskCreateBody) -> dict[str, Any]:
         await scheduler.execution_options(body.model, body.reasoningEffort)
         task = db.create_task(
+            execution_mode=body.executionMode,
+            branch=body.branch,
             model=body.model,
             reasoning_effort=body.reasoningEffort,
             project_id=project_id,
@@ -430,7 +434,7 @@ def create_app(
                 raise ValidationError("请先暂停任务，再修改模型或推理强度")
             await scheduler.execution_options(fields.get("model", current.get("model")), fields.get("reasoningEffort", current.get("reasoningEffort")))
         for field, value in fields.items():
-            if value is None and field not in {"model", "reasoningEffort"}:
+            if value is None and field not in {"model", "reasoningEffort", "branch"}:
                 raise ValidationError(f"{field} cannot be null")
         task = db.update_task(task_id, body.version, **_snake_task_fields(fields))
         await events.publish("task.updated", project_id=task["projectId"], task_id=task_id, payload=task)
@@ -532,7 +536,7 @@ def _snake_project_fields(fields: dict[str, Any]) -> dict[str, Any]:
 
 
 def _snake_task_fields(fields: dict[str, Any]) -> dict[str, Any]:
-    return {("reasoning_effort" if key == "reasoningEffort" else key): value for key, value in fields.items()}
+    return {({"reasoningEffort": "reasoning_effort", "executionMode": "execution_mode"}.get(key, key)): value for key, value in fields.items()}
 
 
 app = create_app()

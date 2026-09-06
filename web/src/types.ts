@@ -78,6 +78,8 @@ export interface Interaction {
 }
 
 export interface ExecutionOptions {
+  executionMode: "local" | "worktree";
+  branch: string | null;
   model: string | null;
   reasoningEffort: string | null;
 }
@@ -90,6 +92,7 @@ export interface CodexModel {
 }
 
 export interface Task extends ExecutionOptions {
+  worktreePath: string | null;
   id: string;
   identifier: string;
   projectId: string;

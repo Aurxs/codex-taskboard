@@ -286,6 +286,12 @@ class CodexAppServer:
             process.stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode())
             await process.stdin.drain()
 
+    async def create_worktree(self, workspace_path: str, branch: str | None) -> dict[str, str]:
+        raise AppServerUnavailable("新工作树需要 Codex 桌面原生连接")
+
+    async def set_worktree_owner(self, git_root: str, thread_id: str) -> None:
+        raise AppServerUnavailable("新工作树需要 Codex 桌面原生连接")
+
     async def start_thread(self, workspace_path: str) -> str:
         response = await self.request("thread/start", {"cwd": workspace_path}, timeout=30)
         thread_id = extract_identifier(response, "threadId", "id")

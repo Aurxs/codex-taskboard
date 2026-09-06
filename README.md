@@ -57,6 +57,8 @@ Normal development and packaged launches share the desktop's existing App Server
 
 ![Task details](docs/images/task-detail-en.png)
 
+Task execution settings offer the current project directory or a new worktree. New worktrees use the Codex desktop's native creation, ownership, and cleanup services and require a desktop connection. Enter an existing local or remote starting branch (for example, `main` or `origin/main`), or leave it empty to copy the current working tree state. Codex manages the independent checkout from that starting point. Once execution starts, location and branch are locked; retries and follow-ups reuse the saved worktree and conversation. Task details show the actual worktree path. If creation times out or the connection drops, check Codex for a created worktree before retrying.
+
 ## Language
 
 Taskboard follows Codex’s display language automatically: Simplified Chinese uses Chinese; every other language, including Traditional Chinese, uses English. The board, sidebar entry, and menu bar launcher update when Codex’s language changes. The launcher uses English until Codex reports its language.
