@@ -23,7 +23,7 @@ This is an independent community project with no affiliation with or endorsement
 
 | Feature | How it works |
 | --- | --- |
-| Four-column board | Todo → In progress → In review → Done; canceled tasks are available separately |
+| Customizable board | Todo and In progress always stay visible; toggle In review, Done, and Canceled under Visible tabs, with Canceled on the far right; display preferences are saved locally |
 | Task dependencies | Set prerequisite tasks; a task enters the execution flow after its blockers are cleared |
 | Parallel scheduling | Opt ordinary tasks into parallel execution or configure dependent subtasks in a group; no concurrency cap |
 | Automation toggles | Auto-claim is off by default, and human review is on by default |

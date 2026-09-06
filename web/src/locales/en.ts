@@ -166,6 +166,8 @@ export const en = {
   "搜索任务": "Search tasks",
   "搜索任务…": "Search tasks…",
   "清除搜索": "Clear search",
+  "显示选项卡": "Visible tabs",
+  "始终显示": "Always visible",
   "显示已取消任务": "Show canceled tasks",
   "已取消": "Canceled",
   "任务面板需要处理": "Taskboard needs attention",

@@ -8930,7 +8930,7 @@ kbd {
 }
 
 .board-scroll {
-  grid-column: span var(--main-column-count, 3);
+  grid-column: 1 / -1;
   justify-self: start;
   flex: 1 1 auto;
   width: 100%;
@@ -11914,7 +11914,7 @@ kbd {
 }
 
 @media (max-width: 760px) {
-  .board-toolbar { overflow: hidden; }
+  .board-toolbar { overflow: visible; }
   .view-tabs { gap: 2px; overflow-x: auto; scrollbar-width: none; }
   .view-tabs::-webkit-scrollbar { display: none; }
   .dashboard-view { padding: 24px 10px 40px; }
@@ -11962,7 +11962,17 @@ kbd {
 }
 
 /* Taskboard composer and compact toolbar use text controls as well as icons. */
-.app-shell .toolbar-tools .other-tasks-trigger { width: auto; flex: 0 0 auto; gap: 6px; padding: 0 8px; white-space: nowrap; }
+.board-columns-anchor { position: relative; flex: 0 0 auto; }
+.board-columns-trigger { display: flex; align-items: center; height: 28px; gap: 6px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); white-space: nowrap; }
+.board-columns-trigger:hover, .board-columns-trigger.is-open { background: var(--surface-active); }
+.board-columns-trigger .taskboard-icon { width: 15px; height: 15px; }
+.board-columns-settings { position: absolute; top: calc(100% + 8px); right: 0; z-index: 80; width: 240px; max-width: calc(100vw - 24px); padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text-primary); box-shadow: 0 8px 30px #00000020; }
+.board-columns-settings > strong { display: block; margin: 0 8px 8px; font-size: 12px; color: var(--text-secondary); }
+.board-column-option { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+.board-column-option:hover { background: var(--surface-muted); }
+.board-column-option:has(input:disabled) { cursor: default; color: var(--text-secondary); }
+.board-column-option input { width: 14px; height: 14px; margin: 0; accent-color: var(--status-review); }
+.board-column-option small { margin-left: auto; color: var(--text-tertiary); font-size: 11px; }
 .app-shell .toolbar-tools .search-field { flex-shrink: 0; }
 .task-dialog.task-form { display: flex; flex-direction: column; min-width: 0; width: min(640px, 100%); max-height: calc(100dvh - 40px); margin: 0; overflow: hidden; }
 .task-dialog .dialog-header, .task-dialog .dialog-footer { flex-shrink: 0; }

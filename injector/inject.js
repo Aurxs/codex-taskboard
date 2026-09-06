@@ -44,6 +44,15 @@
   }
   try { previous?.destroy?.(); } catch (_) {}
 
+  // The sandboxed board cannot access storage; keep display preferences in the host.
+  const BOARD_COLUMNS_KEY = "codex-taskboard.board-columns";
+  const boardColumnOrder = ["todo", "in_progress", "in_review", "done", "canceled"];
+  const normalizeBoardColumns = value => Array.isArray(value)
+    ? boardColumnOrder.filter(status => status === "todo" || status === "in_progress" || value.includes(status))
+    : boardColumnOrder.slice(0, 4);
+  let boardColumns = normalizeBoardColumns(null);
+  try { boardColumns = normalizeBoardColumns(JSON.parse(localStorage.getItem(BOARD_COLUMNS_KEY))); } catch (_) {}
+
   let entry = null;
   let entryLabel = null;
   let page = null;
@@ -639,6 +648,13 @@
     if (!message || typeof message !== "object" || message.capability !== frameCapability) return;
     if (message.type === "taskboard:frame-awaiting-challenge") { postFrameChallenge(); return; }
     if (!frameChallenge || message.challenge !== frameChallenge) return;
+    if (message.type === "taskboard:set-board-columns") {
+      if (!Array.isArray(message.payload?.columns)) return;
+      boardColumns = normalizeBoardColumns(message.payload.columns);
+      try { localStorage.setItem(BOARD_COLUMNS_KEY, JSON.stringify(boardColumns)); } catch (_) {}
+      postToFrame({ type: "taskboard:board-columns", payload: { columns: boardColumns } });
+      return;
+    }
     if (message.type === "taskboard:open-thread") {
       const threadId = message.payload?.threadId;
       if (typeof threadId === "string" && /^[A-Za-z0-9_-]+$/.test(threadId)) {
@@ -657,6 +673,7 @@
     }
     if (message.type !== "taskboard:ready" || frameReady) return;
     frameReady = true;
+    postToFrame({ type: "taskboard:board-columns", payload: { columns: boardColumns } });
     frameReadyWaiters.forEach(({ resolve, timer }) => { window.clearTimeout(timer); resolve(); });
     frameReadyWaiters.clear();
     if (active) showFrame();

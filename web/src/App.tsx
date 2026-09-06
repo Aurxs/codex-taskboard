@@ -31,6 +31,7 @@ import {
   PRIORITY_LABELS,
   STATUS_LABELS,
   TASK_PRIORITIES,
+  type AnyTaskStatus,
   type EventEnvelope,
   type HostContext,
   type Interaction,
@@ -39,14 +40,18 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "./types";
-import { BoardColumn } from "./components/BoardColumn";
+import { BoardColumn, STATUS_DETAILS } from "./components/BoardColumn";
 import { LinearIcon } from "./components/LinearIcon";
 import { TaskDetail } from "./components/TaskDetail";
 import { TaskEditor } from "./components/TaskEditor";
-import { TaskCard } from "./components/TaskCard";
 import { TaskboardIcon } from "./components/TaskboardIcon";
 
-const COLUMN_ORDER: TaskStatus[] = ["todo", "in_progress", "in_review", "done"];
+const COLUMN_ORDER: AnyTaskStatus[] = ["todo", "in_progress", "in_review", "done", "canceled"];
+const DEFAULT_COLUMNS = COLUMN_ORDER.filter(status => status !== "canceled");
+const isRequiredColumn = (status: AnyTaskStatus) => status === "todo" || status === "in_progress";
+function normalizeColumns(value: unknown): AnyTaskStatus[] {
+  return Array.isArray(value) ? COLUMN_ORDER.filter(status => isRequiredColumn(status) || value.includes(status)) : DEFAULT_COLUMNS;
+}
 
 type Notice = { id: number; tone: "error" | "success" | "info"; message: string };
 
@@ -173,7 +178,36 @@ function ProjectSettingsMenu({
   );
 }
 
-function BoardToolbar({ search, onSearch, includeCanceled, onIncludeCanceled }: { search: string; onSearch: (value: string) => void; includeCanceled: boolean; onIncludeCanceled: (value: boolean) => void }) {
+function BoardColumnSettings({ columns, onChange }: { columns: AnyTaskStatus[]; onChange: (columns: AnyTaskStatus[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setOpen(false); triggerRef.current?.focus(); }
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", escape); };
+  }, [open]);
+  return (
+    <div className="board-columns-anchor" ref={rootRef}>
+      <button ref={triggerRef} className={`board-columns-trigger${open ? " is-open" : ""}`} type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls="board-columns-settings" onClick={() => setOpen(value => !value)}><TaskboardIcon name="panel" /><span>{t("显示选项卡")}</span></button>
+      {open && <div className="board-columns-settings" id="board-columns-settings" role="dialog" aria-label={t("显示选项卡")}>
+        <strong>{t("显示选项卡")}</strong>
+        {COLUMN_ORDER.map(status => <label key={status} className="board-column-option">
+          <input type="checkbox" checked={columns.includes(status)} disabled={isRequiredColumn(status)} onChange={event => onChange(normalizeColumns(event.target.checked ? [...columns, status] : columns.filter(item => item !== status)))} />
+          <span>{STATUS_DETAILS[status].label}</span>
+          {isRequiredColumn(status) && <small>{t("始终显示")}</small>}
+        </label>)}
+      </div>}
+    </div>
+  );
+}
+
+function BoardToolbar({ search, onSearch, columns, onColumnsChange }: { search: string; onSearch: (value: string) => void; columns: AnyTaskStatus[]; onColumnsChange: (columns: AnyTaskStatus[]) => void }) {
   return (
     <div className="board-toolbar">
       <div className="view-tabs" aria-label={t("看板视图")}><button className="view-tab active" type="button" aria-pressed="true">{t("议题看板")}</button></div>
@@ -184,7 +218,7 @@ function BoardToolbar({ search, onSearch, includeCanceled, onIncludeCanceled }: 
           {!search && <kbd>/</kbd>}
           {search && <button className="search-clear" type="button" aria-label={t("清除搜索")} onClick={() => onSearch("")}><LinearIcon name="close" /></button>}
         </div>
-        <button className={`other-tasks-trigger${includeCanceled ? " is-open" : ""}`} type="button" aria-controls="canceled-tasks-panel" aria-expanded={includeCanceled} aria-pressed={includeCanceled} onClick={() => onIncludeCanceled(!includeCanceled)} title={t("显示已取消任务")}><TaskboardIcon name="panel" /><span>{t("已取消")}</span></button>
+        <BoardColumnSettings columns={columns} onChange={onColumnsChange} />
       </div>
     </div>
   );
@@ -224,7 +258,12 @@ function EmbeddedTaskboard() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncAttempt, setSyncAttempt] = useState(0);
   const [search, setSearch] = useState("");
-  const [includeCanceled, setIncludeCanceled] = useState(false);
+  const [columns, setColumns] = useState<AnyTaskStatus[]>(DEFAULT_COLUMNS);
+  const changeColumns = (value: AnyTaskStatus[]) => {
+    const next = normalizeColumns(value);
+    setColumns(next);
+    postEmbeddedHostMessage({ type: "taskboard:set-board-columns", payload: { columns: next } });
+  };
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<TaskStatus | null>(null);
   const [notices, setNotices] = useState<Notice[]>([]);
@@ -258,6 +297,10 @@ function EmbeddedTaskboard() {
         if (!challenge) return;
         setEmbeddedFrameChallenge(challenge);
         postEmbeddedHostMessage({ type: "taskboard:ready" });
+        return;
+      }
+      if (message.type === "taskboard:board-columns" && message.payload && typeof message.payload === "object") {
+        setColumns(normalizeColumns((message.payload as { columns?: unknown }).columns));
         return;
       }
       if (message.type === "taskboard:host-context" && message.payload && typeof message.payload === "object") {
@@ -477,12 +520,11 @@ function EmbeddedTaskboard() {
   const visibleTasks = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
     return tasks.filter((task) => {
-      if (!includeCanceled && task.status === "canceled") return false;
       return !needle || `${task.identifier} ${task.title} ${task.description}`.toLocaleLowerCase().includes(needle);
     });
-  }, [includeCanceled, search, tasks]);
-  const grouped = useMemo(() => Object.fromEntries(COLUMN_ORDER.map((status) => [status, visibleTasks.filter((task) => task.status === status).sort((a, b) => status === "done" ? Date.parse(b.completedAt ?? b.updatedAt) - Date.parse(a.completedAt ?? a.updatedAt) : 0)])) as Record<TaskStatus, Task[]>, [visibleTasks]);
-  const appShellStyle = { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px`, "--main-column-count": 4, "--main-board-min-width": "1272px", "--main-board-max-width": "1672px" } as CSSProperties;
+  }, [search, tasks]);
+  const grouped = useMemo(() => Object.fromEntries(COLUMN_ORDER.map((status) => [status, visibleTasks.filter((task) => task.status === status).sort((a, b) => status === "done" ? Date.parse(b.completedAt ?? b.updatedAt) - Date.parse(a.completedAt ?? a.updatedAt) : 0)])) as Record<AnyTaskStatus, Task[]>, [visibleTasks]);
+  const appShellStyle = { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px`, "--main-column-count": columns.length, "--main-board-min-width": `${columns.length * 300 + (columns.length - 1) * 24}px`, "--main-board-max-width": `${columns.length * 400 + (columns.length - 1) * 24}px` } as CSSProperties;
 
   return (
     <div className="app-shell embedded" style={appShellStyle}>
@@ -501,16 +543,16 @@ function EmbeddedTaskboard() {
           </div>
         </header>
 
-        {!selectedTask && selectedProject && <BoardToolbar search={search} onSearch={setSearch} includeCanceled={includeCanceled} onIncludeCanceled={setIncludeCanceled} />}
+        {!selectedTask && selectedProject && <BoardToolbar search={search} onSearch={setSearch} columns={columns} onColumnsChange={changeColumns} />}
         {syncError && <ErrorBanner message={syncError} onRetry={() => setSyncAttempt(value => value + 1)} />}
         {!hostContext || loading || projects.length === 0 || !selectedProject ? <HostWaitingMessage hasProjects={Boolean(hostContext?.projects?.length)} /> : selectedTask ? <TaskDetail key={selectedTask.id} task={selectedTask} tasks={tasks.filter((task) => task.status !== "canceled")} onBack={() => { if (selectedTask.parentId) { setSelectedTaskId(selectedTask.parentId); void getTask(selectedTask.parentId).then(setDetail).catch(error => notify(compactError(error), "error")); } else { setSelectedTaskId(null); setDetail(null); } }} onOpenTask={task => { setSelectedTaskId(task.id); setDetail(task); void getTask(task.id).then(setDetail).catch(error => notify(compactError(error), "error")); }} onUpdate={updateTaskResource} onDependencies={updateDependencies} onAction={performAction} onResolveInteraction={resolveTaskInteraction} /> : (
-          <div className={`issue-board-layout${includeCanceled ? " has-other-tasks" : ""}`} data-main-columns={4}>
+          <div className="issue-board-layout" data-main-columns={columns.length}>
             <div className="board-scroll" aria-label={t("议题看板")}>
               <div className="board">
-                {COLUMN_ORDER.map((status) => <BoardColumn key={status} status={status} tasks={grouped[status]} isDropTarget={dropTarget === status} draggedTaskId={draggedTaskId} onCreate={setEditorStatus} onEdit={(task) => { setSelectedTaskId(task.id); setDetail(task); void getTask(task.id).then(next => setDetail(current => current?.id === next.id && next.version >= current.version ? { ...next, children: next.children ?? current.children, operations: next.operations ?? current.operations } : current)).catch((error) => notify(compactError(error), "error")); }} onComplete={(task) => { if (window.confirm(t(task.parallel?.managed ? "确认并合入 {0} 的当前成果？" : "确定完成 {0} 吗？", task.identifier))) void performAction(task, "complete"); }} onDragStart={(task) => setDraggedTaskId(task.id)} onDragEnd={() => { setDraggedTaskId(null); setDropTarget(null); }} onDragEnter={setDropTarget} onDrop={(column, taskId) => void drop(column, taskId)} />)}
+                {columns.map((status) => <BoardColumn key={status} status={status} tasks={grouped[status]} isDropTarget={dropTarget === status} draggedTaskId={draggedTaskId} onCreate={setEditorStatus} onEdit={(task) => { setSelectedTaskId(task.id); setDetail(task); void getTask(task.id).then(next => setDetail(current => current?.id === next.id && next.version >= current.version ? { ...next, children: next.children ?? current.children, operations: next.operations ?? current.operations } : current)).catch((error) => notify(compactError(error), "error")); }} onComplete={(task) => { if (window.confirm(t(task.parallel?.managed ? "确认并合入 {0} 的当前成果？" : "确定完成 {0} 吗？", task.identifier))) void performAction(task, "complete"); }} onDragStart={(task) => setDraggedTaskId(task.id)} onDragEnd={() => { setDraggedTaskId(null); setDropTarget(null); }} onDragEnter={setDropTarget} onDrop={(column, taskId) => void drop(column, taskId)} />)}
               </div>
             </div>
-            {includeCanceled && <aside className="other-tasks-panel is-open" id="canceled-tasks-panel" aria-label={t("已取消任务")}><header className="other-tasks-header"><div className="other-tasks-heading"><TaskboardIcon name="panel" /><h2>{t("已取消")}</h2></div><button className="icon-button other-tasks-close" type="button" onClick={() => setIncludeCanceled(false)} aria-label={t("关闭已取消任务")}><LinearIcon name="close" /></button></header><div className="other-tasks-list">{visibleTasks.filter((task) => task.status === "canceled").map((task) => <TaskCard key={task.id} task={task} isDragging={false} onEdit={(item) => { setSelectedTaskId(item.id); setDetail(item); void getTask(item.id).then(next => setDetail(current => current?.id === next.id && next.version >= current.version ? { ...next, children: next.children ?? current.children, operations: next.operations ?? current.operations } : current)).catch((error) => notify(compactError(error), "error")); }} onComplete={() => undefined} onDragStart={() => undefined} onDragEnd={() => undefined} />)}{visibleTasks.filter((task) => task.status === "canceled").length === 0 && <div className="other-tasks-empty"><strong>{t("没有已取消任务")}</strong><span>{t("被取消的任务会显示在这里。")}</span></div>}</div></aside>}
+
           </div>
         )}
       </main>

@@ -1,14 +1,16 @@
 import { t } from "../i18n";
 import { useEffect, useState, type DragEvent } from "react";
-import type { Task, TaskStatus } from "../types";
+import type { Task, TaskStatus, AnyTaskStatus } from "../types";
 import { PlusIcon, StatusIcon } from "./SemanticIcons";
+import { LinearIcon } from "./LinearIcon";
 import { TaskCard } from "./TaskCard";
 
-export const STATUS_DETAILS: Record<TaskStatus, { label: string; tone: string }> = {
+export const STATUS_DETAILS: Record<AnyTaskStatus, { label: string; tone: string }> = {
   todo: { get label() { return t("等待认领"); }, tone: "todo" },
   in_progress: { get label() { return t("处理中"); }, tone: "progress" },
   in_review: { get label() { return t("等你确认"); }, tone: "review" },
   done: { get label() { return t("已完成"); }, tone: "done" },
+  canceled: { get label() { return t("已取消"); }, tone: "canceled" },
 };
 
 export function BoardColumn({
@@ -24,7 +26,7 @@ export function BoardColumn({
   onDragEnter,
   onDrop,
 }: {
-  status: TaskStatus;
+  status: AnyTaskStatus;
   tasks: Task[];
   isDropTarget: boolean;
   draggedTaskId: string | null;
@@ -51,6 +53,7 @@ export function BoardColumn({
   }
 
   function handleDrop(event: DragEvent<HTMLElement>) {
+    if (status === "canceled") return;
     event.preventDefault();
     const taskId = event.dataTransfer.getData("application/x-taskboard-task") || event.dataTransfer.getData("text/plain");
     if (taskId) onDrop(status, taskId, findDropBefore(event.currentTarget, event.clientY));
@@ -61,8 +64,9 @@ export function BoardColumn({
     <section
       className={`board-column status-${status}${isDropTarget ? " is-drop-target" : ""}`}
       aria-labelledby={`column-${status}`}
-      onDragEnter={() => onDragEnter(status)}
+      onDragEnter={() => { if (status !== "canceled") onDragEnter(status); }}
       onDragOver={(event) => {
+        if (status === "canceled") return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         onDragEnter(status);
@@ -75,16 +79,16 @@ export function BoardColumn({
     >
       <header className="column-header">
         <div className="column-heading">
-          <span className={`column-status-icon status-icon-${details.tone}`}><StatusIcon status={status} color="var(--column-status-color)" size={14} /></span>
+          <span className={`column-status-icon status-icon-${details.tone}`}>{status === "canceled" ? <LinearIcon name="close" /> : <StatusIcon status={status} color="var(--column-status-color)" size={14} />}</span>
           <h2 id={`column-${status}`}>{details.label}{tasks.length > 0 ? ` ${tasks.length}` : ""}</h2>
         </div>
-        <div className="column-actions">
+        {status !== "canceled" && <div className="column-actions">
           <button type="button" className="icon-button add-task-button" onClick={() => onCreate(status)} aria-label={t("在{0}中新建任务", details.label)} title={t("添加到{0}", details.label)}><PlusIcon color="var(--column-status-color)" size={12} /></button>
-        </div>
+        </div>}
       </header>
       <div className="column-list">
         {tasks.map((task) => <TaskCard key={task.id} task={task} isDragging={draggedTaskId === task.id} onEdit={onEdit} onComplete={onComplete} onDragStart={onDragStart} onDragEnd={onDragEnd} />)}
-        {tasks.length === 0 && <div className="column-empty">{status === "todo" ? t("暂无待认领任务") : status === "in_progress" ? t("暂无处理中任务") : status === "in_review" ? t("暂无待确认任务") : t("完成的任务会出现在这里")}</div>}
+        {tasks.length === 0 && <div className="column-empty">{status === "todo" ? t("暂无待认领任务") : status === "in_progress" ? t("暂无处理中任务") : status === "in_review" ? t("暂无待确认任务") : status === "canceled" ? t("没有已取消任务") : t("完成的任务会出现在这里")}</div>}
         {isDropTarget && dropBeforeTaskId && remainingTasks.length === 0 && null}
       </div>
     </section>
