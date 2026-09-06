@@ -864,6 +864,7 @@ class Database(ParallelDatabase):
         last_message: str | None | object = _UNSET,
         last_error: Any = _UNSET,
         attachments: list[dict[str, str]] | None = None,
+        remove_attachment_ids: list[str] | None = None,
         kind: str | object = _UNSET,
         scheduling_mode: str | object = _UNSET,
         write_scopes: list[str] | object = _UNSET,
@@ -944,7 +945,7 @@ class Database(ParallelDatabase):
             else:
                 values["last_error"] = _json(last_error)
         prepared = self._prepare_attachments(attachments or [])
-        if not values and not prepared:
+        if not values and not prepared and not remove_attachment_ids:
             return self.get_task(task_id)
         values["updated_at"] = utc_now()
         assignments = ", ".join(f"{column} = ?" for column in values)
@@ -956,10 +957,6 @@ class Database(ParallelDatabase):
                 assignments += ", completed_at = NULL"
             params = [*values.values(), task_id, expected_version]
         with self.transaction(immediate=True):
-            if prepared:
-                existing = self._conn.execute("SELECT count(*), coalesce(sum(length(content)), 0) FROM task_attachments WHERE task_id = ?", (task_id,)).fetchone()
-                if existing[0] + len(prepared) > 10 or existing[1] + sum(len(content) for _, _, content in prepared) > 20 * 1024 * 1024:
-                    raise ValidationError("最多 10 个附件，合计最多 20 MB")
             if priority == "draft":
                 current = self._conn.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
                 if current is not None and current["status"] == "in_progress" and not (
@@ -979,6 +976,16 @@ class Database(ParallelDatabase):
                 raise ConflictError(
                     f"Task {task_id} changed; expected version {expected_version}, current {exists['version']}"
                 )
+            for attachment_id in dict.fromkeys(remove_attachment_ids or []):
+                removed = self._conn.execute(
+                    "DELETE FROM task_attachments WHERE id = ? AND task_id = ?", (attachment_id, task_id)
+                )
+                if removed.rowcount == 0:
+                    raise ValidationError("附件不存在或不属于当前任务。")
+            if prepared:
+                existing = self._conn.execute("SELECT count(*), coalesce(sum(length(content)), 0) FROM task_attachments WHERE task_id = ?", (task_id,)).fetchone()
+                if existing[0] + len(prepared) > 10 or existing[1] + sum(len(content) for _, _, content in prepared) > 20 * 1024 * 1024:
+                    raise ValidationError("最多 10 个附件，合计最多 20 MB")
             self._conn.executemany("INSERT INTO task_attachments(id, task_id, name, content) VALUES (?, ?, ?, ?)",
                                    [(aid, task_id, name, content) for aid, name, content in prepared])
             updated = self._task_json_locked(task_id)

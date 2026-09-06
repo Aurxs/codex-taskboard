@@ -109,6 +109,7 @@ class PlanConfirmBody(VersionBody):
 
 class TaskUpdateBody(TaskExecutionBody):
     attachments: list[AttachmentBody] = Field(default_factory=list, max_length=10)
+    removeAttachmentIds: list[str] = Field(default_factory=list, max_length=10)
     version: int = Field(ge=1)
     title: str | None = None
     description: str | None = None
@@ -615,7 +616,8 @@ def _snake_project_fields(fields: dict[str, Any]) -> dict[str, Any]:
 
 def _snake_task_fields(fields: dict[str, Any]) -> dict[str, Any]:
     mapping = {"reasoningEffort": "reasoning_effort", "executionMode": "execution_mode", "schedulingMode": "scheduling_mode",
-               "writeScopes": "write_scopes", "targetBranch": "target_branch", "blockedByIds": "blocked_by_ids"}
+               "writeScopes": "write_scopes", "targetBranch": "target_branch", "blockedByIds": "blocked_by_ids",
+               "removeAttachmentIds": "remove_attachment_ids"}
     return {mapping.get(key, key): value for key, value in fields.items()}
 
 

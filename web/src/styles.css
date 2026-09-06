@@ -12116,6 +12116,8 @@ kbd {
 .activity-command-box pre { margin: 4px 0 0; border: 1px solid var(--border); }
 
 button.attachment-link { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.attachment-remove { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; }
+.attachment-remove:hover:not(:disabled) { color: var(--danger); }
 .attachment-preview { width: min(900px, 90vw); max-height: 85vh; padding: 0; border: 1px solid var(--border); border-radius: 12px; color: var(--text-primary); background: var(--surface-raised); box-shadow: 0 20px 80px #0006; }
 .attachment-preview::backdrop { background: #0008; }
 .attachment-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }

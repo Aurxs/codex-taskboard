@@ -121,6 +121,59 @@ class HttpContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current["attachments"], updated["attachments"])
         self.assertEqual(current["version"], updated["version"])
 
+    async def test_remove_attachments_is_persistent_and_versioned(self):
+        db = self.app.state.db
+        project = db.create_project(key="REMOVE", name="Remove", workspace_path=self.temp_dir.name)
+        task = db.create_task(project_id=project["id"], title="Files", priority="draft", attachments=[
+            {"name": "first.md", "content": "YQ=="}, {"name": "second.md", "content": "Yg=="}])
+        first, second = task["attachments"]
+        url = f"/api/tasks/{task['id']}"
+        response = await self.client.patch(url, json={"version": task["version"], "removeAttachmentIds": [first["id"]]})
+        self.assertEqual(response.status_code, 200)
+        updated = response.json()
+        self.assertEqual(updated["attachments"], [second])
+        self.assertEqual(updated["version"], task["version"] + 1)
+        self.assertEqual((await self.client.get(url)).json()["attachments"], [second])
+        self.assertEqual((await self.client.get(first["url"])).status_code, 404)
+        self.assertEqual((await self.client.get(first["url"] + "/preview")).status_code, 404)
+        self.assertEqual((await self.client.get(second["url"])).content, b"b")
+        self.assertNotIn(first["id"], db.attachment_prompt(task["id"]))
+        duplicate = await self.client.patch(url, json={"version": task["version"], "removeAttachmentIds": [first["id"]]})
+        self.assertEqual(duplicate.status_code, 409)
+        conflict = await self.client.patch(url, json={"version": task["version"], "removeAttachmentIds": [second["id"]]})
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(db.get_task(task["id"])["attachments"], [second])
+        response = await self.client.patch(url, json={"version": updated["version"], "removeAttachmentIds": [second["id"]]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["attachments"], [])
+        self.assertEqual(db.attachment_prompt(task["id"]), "")
+
+    async def test_remove_attachments_checks_ownership_and_rolls_back_invalid_updates(self):
+        db = self.app.state.db
+        project = db.create_project(key="ATOMIC", name="Atomic", workspace_path=self.temp_dir.name)
+        files = [{"name": f"{i}.md", "content": "YQ=="} for i in range(10)]
+        task = db.create_task(project_id=project["id"], title="Files", priority="draft", attachments=files)
+        other = db.create_task(project_id=project["id"], title="Other", priority="draft", attachments=files[:1])
+        first = task["attachments"][0]
+        url = f"/api/tasks/{task['id']}"
+        for changes in (
+            {"removeAttachmentIds": [first["id"], other["attachments"][0]["id"]]},
+            {"removeAttachmentIds": [first["id"], "missing"]},
+            {"removeAttachmentIds": [first["id"]], "attachments": files[:2]},
+        ):
+            response = await self.client.patch(url, json={"version": task["version"], "title": "Changed", **changes})
+            self.assertEqual(response.status_code, 422)
+            current = db.get_task(task["id"])
+            self.assertEqual(current["attachments"], task["attachments"])
+            self.assertEqual(current["version"], task["version"])
+            self.assertEqual(current["title"], task["title"])
+        self.assertEqual(db.get_task(other["id"])["attachments"], other["attachments"])
+        response = await self.client.patch(url, json={"version": task["version"],
+            "removeAttachmentIds": [first["id"]], "attachments": [{"name": "replacement.md", "content": "Yg=="}]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["attachments"]), 10)
+        self.assertEqual(response.json()["attachments"][-1]["name"], "replacement.md")
+
     async def test_project_defaults_null_validation_conflict_and_static(self) -> None:
         health = await self.client.get("/health")
         self.assertEqual(health.status_code, 200)

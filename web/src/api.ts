@@ -253,7 +253,7 @@ export async function createTask(
 export async function updateTask(
   id: string,
   version: number,
-  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("./types").AttachmentInput[] }),
+  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("./types").AttachmentInput[]; removeAttachmentIds?: string[] }),
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: "PATCH",

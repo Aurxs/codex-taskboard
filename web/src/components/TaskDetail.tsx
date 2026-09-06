@@ -88,7 +88,7 @@ export function TaskDetail({
   task: Task;
   tasks: Task[];
   onBack: () => void;
-  onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[] })) => Promise<Task | null>;
+  onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[]; removeAttachmentIds?: string[] })) => Promise<Task | null>;
   onDependencies: (task: Task, ids: string[]) => Promise<Task | null>;
   onAction: (task: Task, action: TaskAction, feedback?: string, targetStatus?: "in_review" | "done") => Promise<Task | null>;
   onResolveInteraction: (interaction: Interaction, response: unknown) => Promise<void>;
@@ -135,6 +135,7 @@ export function TaskDetail({
   const uploading = useRef(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [addingAttachments, setAddingAttachments] = useState(false);
+  const [removingAttachmentId, setRemovingAttachmentId] = useState<string | null>(null);
   async function addFiles(files: File[]) {
     if (!files.length || uploading.current || saving) return;
     uploading.current = true;
@@ -144,10 +145,25 @@ export function TaskDetail({
       validateAttachments(current.attachments ?? [], files);
       const attachments = await readAttachments(files);
       const next = await onUpdate(current, { attachments });
-      if (next) setCurrent(next);
+      if (next) setCurrent(previous => next.version >= previous.version ? next : previous);
       else setAttachmentError(t("附件未保存，请重新添加。"));
     } catch (cause) { setAttachmentError(cause instanceof Error ? cause.message : t("附件添加失败。")); }
     finally { uploading.current = false; setAddingAttachments(false); }
+  }
+
+  async function removeFile(id: string) {
+    if (uploading.current || saving) return;
+    uploading.current = true;
+    setRemovingAttachmentId(id);
+    setAttachmentError(null);
+    try {
+      const next = await onUpdate(current, { removeAttachmentIds: [id] });
+      if (next) {
+        setCurrent(previous => next.version >= previous.version ? next : previous);
+        setPreviewFile(file => file?.id === id ? null : file);
+      } else setAttachmentError(t("附件未移除，请重试。"));
+    } catch (cause) { setAttachmentError(cause instanceof Error ? cause.message : t("附件未移除，请重试。")); }
+    finally { uploading.current = false; setRemovingAttachmentId(null); }
   }
 
   useEffect(() => {
@@ -159,7 +175,7 @@ export function TaskDetail({
   }, [task]);
 
   const pendingInteractions = useMemo(() => (current.interactions ?? []).filter((interaction) => interaction.status === "pending"), [current.interactions]);
-  async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[] })) {
+  async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[]; removeAttachmentIds?: string[] })) {
     setSaving(true);
     try {
       const next = await onUpdate(current, changes);
@@ -195,16 +211,17 @@ export function TaskDetail({
               <div className="issue-editor-content" onPaste={event => { void addFiles(pastedFiles(event)); }}>
                 <textarea className="issue-title-input" rows={1} value={title} disabled={saving} onChange={(event) => { dirty.current.title = true; drafts.current.title = event.target.value; setTitle(event.target.value); }} onBlur={() => { if (title.trim() && title.trim() !== current.title) { drafts.current.title = title.trim(); setTitle(title.trim()); void save({ title: title.trim() }); } }} />
                 {editingDescription ? <div className="issue-description-composer"><textarea className="issue-description-input" rows={10} value={description} onChange={(event) => { dirty.current.description = true; drafts.current.description = event.target.value; setDescription(event.target.value); }} onBlur={() => void saveText()} autoFocus /></div> : <div className={`issue-description-read${description ? "" : " empty"}`} tabIndex={0} onClick={() => setEditingDescription(true)} onKeyDown={(event) => { if (event.key === "Enter") setEditingDescription(true); }}><div className="issue-description-document">{description ? description.split(/\n\n+/).map((paragraph, index) => <p key={index}>{plainMarkdown(paragraph)}</p>) : t("添加描述…")}</div></div>}
-                {(current.attachments ?? []).length > 0 && <section className="issue-attachments"><h2>{t("附件")}</h2><ul className="attachment-list">{current.attachments?.map(file => <li key={file.id}><button type="button" className="attachment-link" onClick={() => setPreviewFile(file)}><span className="attachment-copy"><strong>{file.name}</strong><span>{Math.ceil(file.size / 1024)}  {t("KB · 查看")}</span></span></button></li>)}</ul></section>}
+                {(current.attachments ?? []).length > 0 && <section className="issue-attachments"><h2>{t("附件")}</h2><ul className="attachment-list">{current.attachments?.map(file => <li key={file.id}><button type="button" className="attachment-link" onClick={() => setPreviewFile(file)}><span className="attachment-copy"><strong>{file.name}</strong><span>{Math.ceil(file.size / 1024)}  {t("KB · 查看")}</span></span></button><button type="button" className="quiet-button attachment-remove" disabled={saving || addingAttachments || removingAttachmentId !== null} aria-label={t("移除 {0}", file.name)} title={t("移除 {0}", file.name)} onClick={() => void removeFile(file.id)}>×</button></li>)}</ul></section>}
                 <div className="property-row issue-detail-inline-properties">
                   <TaskPropertyPicker value={priority} options={TASK_PRIORITIES.map((item) => ({ value: item, label: PRIORITY_LABELS[item], className: `priority-${item}`, icon: <PriorityIcon priority={item} size={14} /> }))} open={propertyOpen} onOpenChange={setPropertyOpen} onChange={(value) => { const next = value as TaskPriority; dirty.current.priority = true; drafts.current.priority = next; setPriority(next); void save({ priority: next }); }} ariaLabel={t("优先级")} title={t("优先级：{0}", PRIORITY_LABELS[priority])} triggerClassName={`property-priority priority-${priority}`} />
                   <span className="property-control"><StatusIcon status={current.status === "canceled" ? "todo" : current.status as TaskStatus} size={14} /><span>{current.status === "canceled" ? t("已取消") : STATUS_LABELS[current.status as TaskStatus] ?? current.status}</span></span>
                   <DependencyPicker disabled={dependencyLocked} candidates={dependencyCandidates.filter(item => item.id !== current.id && item.status !== "canceled")} value={current.blockedBy.map(item => item.id)} onChange={ids => void dependencyChange(ids)} />
-                  <AttachmentButton count={current.attachments?.length ?? 0} disabled={saving || addingAttachments} onAdd={files => void addFiles(files)} />
+                  <AttachmentButton count={current.attachments?.length ?? 0} disabled={saving || addingAttachments || removingAttachmentId !== null} onAdd={files => void addFiles(files)} />
                   {current.threadId && <button type="button" className="property-control" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: current.threadId } })}><ProjectIcon size={14} /><span>{t("在 Codex 中打开")}</span></button>}
                 </div>
                 {current.priority === "draft" && <p className="composer-draft-note">{t("草稿不会被 Codex 认领，修改优先级后即可发布。")}</p>}
                 {addingAttachments && <p className="composer-draft-note" role="status">{t("正在添加附件…")}</p>}
+                {removingAttachmentId && <p className="composer-draft-note" role="status">{t("正在移除附件…")}</p>}
                 {attachmentError && <p className="form-error" role="alert">{localizeError(attachmentError)}</p>}
               </div>
             </div>
