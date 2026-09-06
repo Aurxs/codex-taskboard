@@ -83,7 +83,6 @@ export function TaskCard({
         {task.threadId && <span className="task-thread-chip" title={t("已关联 Codex thread")}>⌁</span>}
       </div>
       {task.blockedBy.length > 0 && <div className="task-card-dependencies"><span className="task-card-dependency-lock" aria-hidden="true">⌑</span><span>{t("阻塞于")} {task.blockedBy.map((item) => item.identifier).join(", ")}</span></div>}
-      {task.model && <div className="task-card-execution" title={t("在任务详情中修改模型与推理强度")}>{task.model}{task.reasoningEffort ? ` · ${task.reasoningEffort}` : ""}</div>}
       {processing && (
         <div className={`task-processing-row${task.runState === "running" ? " is-running" : " is-paused"}`}>
           {task.runState === "running" && <img className="task-processing-glyph" src={processingAnimation} alt="" aria-hidden="true" />}
