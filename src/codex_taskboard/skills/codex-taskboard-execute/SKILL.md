@@ -11,5 +11,6 @@ Complete the supplied task in the current project directory, following the proje
 - Keep changes within the declared modification scope, when supplied; request clarification before expanding it.
 - If a dependency integration revision is supplied, resolve pending merge conflicts and revalidate this task against the updated dependencies.
 - Perform verification proportionate to the changes. Before completing the task, commit the changes produced by this task.
+- Format Git commit subjects as `<type>: <中文简述>`, using a lowercase English type, an ASCII colon and one space, followed by a concise Chinese summary of the actual changes. Choose the type that matches the changes, such as `feat`, `fix`, `docs`, `refactor`, `test`, `build`, `ci` or `chore`. Example: `feat: 添加模块化 Windows 桌面与打包适配`.
 - In the final response, describe what was completed, verification results, and any unfinished work or questions requiring a human decision. Use the language of the task title and description unless the user requests otherwise.
 - Do not operate Taskboard; the scheduler manages task status.
