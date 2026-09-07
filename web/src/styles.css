@@ -12025,13 +12025,13 @@ kbd {
 .app-shell .issue-description-input { overflow: auto; max-height: 50vh; resize: vertical; }
 .app-shell .issue-properties { min-height: 0; overflow: auto; position: static; scrollbar-width: thin; }
 /* Native-style follow-up composer, with only attachment and send controls. */
-.task-followup { flex-shrink: 0; margin: 12px 6px 8px; padding: 16px 16px 12px; border: 1px solid var(--border); border-radius: 26px; background: var(--surface-raised); box-shadow: 0 0 6px #00000006, 0 3px 14px #00000008; overflow: hidden; }
+.task-followup { flex-shrink: 0; margin: 8px 6px; padding: 10px 12px 8px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface-raised); box-shadow: 0 0 6px #00000006, 0 3px 14px #00000008; overflow: hidden; }
 .task-followup:focus-within { border-color: var(--text-tertiary); }
-.task-followup textarea { display: block; box-sizing: border-box; width: 100%; height: 64px; min-height: 0; max-height: 180px; resize: none; overflow: auto; padding: 2px 4px; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; font-size: 14px; line-height: 24px; scrollbar-width: thin; }
+.task-followup textarea { display: block; box-sizing: border-box; width: 100%; height: 40px; min-height: 0; max-height: 180px; resize: none; overflow: auto; padding: 2px 4px; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; font-size: 13px; line-height: 20px; scrollbar-width: thin; }
 .task-followup textarea::placeholder { color: var(--text-tertiary); }
-.task-followup-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 12px; }
-.task-followup-footer > button { display: grid; place-items: center; flex: 0 0 auto; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
-.task-followup-footer > button svg { width: 20px; height: 20px; }
+.task-followup-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 4px; }
+.task-followup-footer > button { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
+.task-followup-footer > button svg { width: 18px; height: 18px; }
 .task-followup-send { background: var(--text-primary); color: var(--bg); }
 .task-followup-attach { background: transparent; color: var(--text-primary); }
 .task-followup-attach:hover:not(:disabled) { background: var(--surface-hover); }
