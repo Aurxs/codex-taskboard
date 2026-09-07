@@ -1,46 +1,41 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useState } from "react";
 import type { Task } from "../types";
 import type { TaskAction } from "../api";
-import { localizeError, t } from "../i18n";
-import { postEmbeddedHostMessage } from "../embeddedHost.mjs";
+import { t } from "../i18n";
+import { LinearIcon } from "./LinearIcon";
 
-export function TaskPlan({ task, disabled, onAction, children }: {
-  task: Task; disabled: boolean; children?: ReactNode;
+type PlanProps = {
+  task: Task; disabled: boolean;
   onAction: (action: TaskAction, text?: string) => Promise<Task | null>;
-}) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const sending = useRef(false);
+};
+
+export function planStatus(task: Task) {
   const plan = task.plan;
-  const hold = plan?.hold;
-  const starting = ["pending", "starting", "uncertain"].includes(plan?.state ?? "");
-  const pending = task.interactions?.some(i => i.status === "pending" && i.payload?.threadId === plan?.threadId);
-  async function act(action: TaskAction) {
-    if (sending.current) return;
-    sending.current = true; setBusy(true);
-    try { if (await onAction(action, action === "plan_continue" ? text.trim() : undefined)) setText(""); }
-    finally { sending.current = false; setBusy(false); }
-  }
-  if (!plan?.operationId && task.status !== "todo") return null;
-  const stateLabel = starting ? t("计划启动中…") : plan?.state === "ready" ? t("最终计划已保存，待确认") : plan?.state === "agent_running" ? t("正在规划…") : plan?.state === "blocked" ? t("计划需要处理") : t("可继续补充计划要求");
-  return <section className="task-plan-section" aria-label={t("任务计划")}>
-    <div className="activity-heading"><h2>{t("任务计划")}</h2>
-      {!hold && task.status === "todo" && <button className="secondary-button" disabled={disabled || busy || task.queued} onClick={() => void act("plan_start")}>Plan · {plan?.acceptedText ? t("重新规划") : t("生成详细计划")}</button>}
-      {hold && <span role="status">{stateLabel}</span>}
-    </div>
-    <p className="settings-note">{hold ? t("规划期间不会执行此任务。回答下方问题或补充要求，确认最终计划后恢复调度。") : t("先与 Codex 澄清需求；确认后的计划会自动附加到后续执行中。")}</p>
-    {plan?.error && hold && <p className="form-error" role="alert">{localizeError(plan.error)}</p>}
-    {plan?.text && hold && <details open className="task-plan-document"><summary>{t("最终计划")}</summary><pre>{plan.text}</pre></details>}
-    {plan?.acceptedText && <details className="task-plan-document" open={!hold}><summary>{t("已确认的执行计划")}</summary><pre>{plan.acceptedText}</pre></details>}
-    {plan?.threadId && <button className="quiet-button" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: plan.threadId } })}>{t("打开计划会话")}</button>}
-    {children}
-    {hold && <>
-      <textarea className="plan-followup" aria-label={t("补充计划要求")} placeholder={t("补充计划要求，或请 Codex 根据回答生成最终计划…")} value={text} onChange={event => setText(event.target.value)} disabled={busy} />
-      <div className="interaction-actions">
-        <button className="quiet-button" disabled={busy || ["pending", "starting"].includes(plan?.state ?? "")} onClick={() => void act("plan_cancel")}>{t("取消规划")}</button>
-        <button className="secondary-button" disabled={busy || starting || !plan?.threadId || !text.trim()} onClick={() => void act("plan_continue")}>{t("发送补充")}</button>
-        <button className="primary-button" disabled={busy || plan?.state !== "ready" || pending} onClick={() => void act("plan_accept")}>{t("确认计划")}</button>
-      </div>
-    </>}
+  if (task.interactions?.some(i => i.status === "pending" && i.payload?.threadId === plan?.threadId)) return t("计划模式 · 等待回应");
+  if (["pending", "starting", "uncertain"].includes(plan?.state ?? "")) return t("计划启动中…");
+  if (plan?.state === "ready") return t("正在保存计划…");
+  if (plan?.state === "blocked") return t("计划需要处理");
+  if (plan?.state === "agent_running") return t("正在执行计划模式");
+  return t("计划模式 · 等待补充");
+}
+
+export function TaskPlanButton({ task, disabled, onAction }: PlanProps) {
+  if (task.kind === "parallel_group" || task.status !== "todo") return null;
+  return <button type="button" className="property-control task-plan-trigger" disabled={disabled || task.queued || ["pending", "starting"].includes(task.plan?.state ?? "")} title={task.plan?.hold ? t("取消规划") : undefined} onClick={() => void onAction(task.plan?.hold ? "plan_cancel" : "plan_start")}>
+    <LinearIcon name="copy" /><span>{task.plan?.hold ? planStatus(task) : task.plan?.acceptedText ? t("重新规划") : t("开始计划")}</span>
+  </button>;
+}
+
+export function TaskPlan({ task, disabled, onAction }: PlanProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const plan = task.plan;
+  const text = plan?.hold ? (plan.state === "ready" ? plan.text : null) : plan?.acceptedText;
+  if (!text) return null;
+  const editable = task.status === "todo" && !task.queued && (plan?.hold ? plan.state === "ready" : !!plan?.acceptedText);
+  return <section className="task-plan-document" aria-label={t("任务计划")}>
+    {draft !== null ? <>
+      <textarea className="task-plan-editor" aria-label={t("编辑计划")} value={draft} disabled={disabled} onChange={e => setDraft(e.target.value)} autoFocus />
+      <div className="interaction-actions"><button type="button" className="quiet-button" disabled={disabled} onClick={() => setDraft(null)}>{t("取消")}</button><button type="button" className="primary-button" disabled={disabled || !draft.trim()} onClick={async () => { if (await onAction("plan_save", draft)) setDraft(null); }}>{t("保存计划")}</button></div>
+    </> : <div className="task-plan-content" role={editable ? "button" : undefined} tabIndex={0} aria-label={editable ? t("编辑计划") : t("最终计划")} aria-disabled={editable && disabled} onClick={() => { if (editable && !disabled) setDraft(text); }} onKeyDown={e => { if (editable && !disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setDraft(text); } }}><pre>{text}</pre></div>}
   </section>;
 }

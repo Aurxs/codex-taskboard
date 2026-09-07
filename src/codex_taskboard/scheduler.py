@@ -689,15 +689,17 @@ class Scheduler:
 
     async def hydrate_activity(self, task: dict[str, Any], *, force: bool = False) -> dict[str, Any] | None:
         """Refresh retained history, including native follow-ups and completed items."""
-        if not task["threadId"]:
+        thread_id = (task["plan"].get("threadId") if task.get("plan", {}).get("hold")
+                     else task["threadId"] or task.get("plan", {}).get("threadId"))
+        if not thread_id:
             return
         async with self._activity_lock:
-            cached = self._history_cache.get(task["id"])
+            cached = self._history_cache.get(thread_id)
             if not force and cached and time.monotonic() - cached[0] < 1:
                 return cached[1]
             await self._ensure_server()
-            self.server.register_thread_task(task["threadId"], task["id"])
-            snapshot = await self.server.read_thread(task["threadId"], include_turns=True)
+            self.server.register_thread_task(thread_id, task["id"])
+            snapshot = await self.server.read_thread(thread_id, include_turns=True)
             thread = snapshot.get("thread", {})
             for turn in thread.get("turns", []):
                 created_at = task["createdAt"]
@@ -705,8 +707,8 @@ class Scheduler:
                     created_at = datetime.fromtimestamp(turn["startedAt"], timezone.utc).isoformat(timespec="milliseconds")
                 for item in turn.get("items", []):
                     self._record_item(task["id"], turn.get("id", ""), item,
-                                      item.get("status") == "completed" or turn.get("status") != "inProgress", created_at)
-            self._history_cache[task["id"]] = (time.monotonic(), snapshot)
+                                      item.get("status") == "completed" or turn.get("status") != "inProgress", created_at, thread_id=thread_id)
+            self._history_cache[thread_id] = (time.monotonic(), snapshot)
             return snapshot
 
     async def _sync_threads(self) -> None:

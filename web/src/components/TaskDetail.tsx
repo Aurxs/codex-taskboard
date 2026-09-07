@@ -1,5 +1,6 @@
 import { ActivityTool, ActivityToolIcon } from "./ActivityTool";
-import { TaskPlan } from "./TaskPlan";
+import { PlanQuestions } from "./PlanQuestions";
+import { TaskPlan, TaskPlanButton, planStatus } from "./TaskPlan";
 import { GroupTasks } from "./GroupTasks";
 import { getTask, type TaskAction } from "../api";
 import { t, getLocale, localizeError } from "../i18n";
@@ -129,14 +130,28 @@ export function TaskDetail({
   const dependencyCandidates = current.parentId ? parentTask?.children ?? [] : tasks;
   const dependencyLocked = !!current.parentId && (!!current.threadId || !!current.worktreePath || !parentTask || !["preparing", "paused"].includes(parentTask.groupPhase ?? ""));
   async function refreshCurrent() { setCurrent(await getTask(current.id)); }
+  const planning = !!current.plan?.hold;
+  const planStarting = ["pending", "starting", "uncertain"].includes(current.plan?.state ?? "");
+  const [planBusy, setPlanBusy] = useState(false);
+  const planSending = useRef(false);
+  async function planAction(action: TaskAction, text?: string) {
+    if (planSending.current) return null;
+    planSending.current = true; setPlanBusy(true);
+    try {
+      const next = await onAction(current, action, text);
+      if (next) setCurrent(previous => next.version >= previous.version ? next : previous);
+      return next;
+    } finally { planSending.current = false; setPlanBusy(false); }
+  }
   const sendingRef = useRef(false);
   async function sendFollowup() {
+    if (planning && (planStarting || !current.plan?.threadId || planSending.current)) return;
     if ((!followup.trim() && !followupAttachments.length) || sendingRef.current || uploading.current || saving) return;
     sendingRef.current = true;
     setSending(true);
     const text = followup;
     try {
-      const next = await onAction(current, "follow_up", text.trim() || t("请查看附件。"), undefined, followupAttachments.map(file => file.id));
+      const next = planning ? await planAction("plan_continue", text.trim()) : await onAction(current, "follow_up", text.trim() || t("请查看附件。"), undefined, followupAttachments.map(file => file.id));
       if (next) {
         setCurrent(previous => next.version >= previous.version ? next : previous);
         setFollowup(value => value === text ? "" : value);
@@ -193,6 +208,7 @@ export function TaskDetail({
   }, [task]);
 
   const pendingInteractions = useMemo(() => (current.interactions ?? []).filter((interaction) => interaction.status === "pending"), [current.interactions]);
+  const planInteractions = planning ? pendingInteractions.filter(i => i.payload?.threadId === current.plan?.threadId) : [];
   async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[]; removeAttachmentIds?: string[] })) {
     setSaving(true);
     try {
@@ -235,20 +251,22 @@ export function TaskDetail({
                   <span className="property-control"><StatusIcon status={current.status === "canceled" ? "todo" : current.status as TaskStatus} size={14} /><span>{current.status === "canceled" ? t("已取消") : STATUS_LABELS[current.status as TaskStatus] ?? current.status}</span></span>
                   <DependencyPicker disabled={dependencyLocked} candidates={dependencyCandidates.filter(item => item.id !== current.id && item.status !== "canceled")} value={current.blockedBy.map(item => item.id)} onChange={ids => void dependencyChange(ids)} />
                   <AttachmentButton count={current.attachments?.length ?? 0} disabled={saving || addingAttachments || removingAttachmentId !== null} onAdd={files => void addFiles(files)} />
-                  {current.threadId && <button type="button" className="property-control" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: current.threadId } })}><ProjectIcon size={14} /><span>{t("在 Codex 中打开")}</span></button>}
+                  <TaskPlanButton task={current} disabled={saving || editingDescription || planBusy} onAction={planAction} />
+                  {(current.threadId || current.plan?.threadId) && <button type="button" className="property-control" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: planning ? current.plan?.threadId : current.threadId || current.plan?.threadId } })}><ProjectIcon size={14} /><span>{t("在 Codex 中打开")}</span></button>}
+                  {current.threadId && current.plan?.threadId && !planning && <button type="button" className="property-control" onClick={() => postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId: current.plan?.threadId } })}>{t("打开计划会话")}</button>}
                 </div>
+                {!isGroup && <TaskPlan task={current} disabled={saving || planBusy} onAction={planAction} />}
                 {current.priority === "draft" && <p className="composer-draft-note">{t("草稿不会被 Codex 认领，修改优先级后即可发布。")}</p>}
                 {addingAttachments && <p className="composer-draft-note" role="status">{t("正在添加附件…")}</p>}
                 {removingAttachmentId && <p className="composer-draft-note" role="status">{t("正在移除附件…")}</p>}
                 {attachmentError && <p className="form-error" role="alert">{localizeError(attachmentError)}</p>}
               </div>
             </div>
-            {!isGroup && <TaskPlan task={current} disabled={saving || editingDescription} onAction={async (action, text) => { const next = await onAction(current, action, text); if (next) setCurrent(next); return next; }}>{current.plan?.hold && pendingInteractions.filter(i => i.payload?.threadId === current.plan?.threadId).map(interaction => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</TaskPlan>}
             {isGroup && <GroupTasks group={current} onRefresh={refreshCurrent} onOpen={onOpenTask} />}
             {(current.waitReason || paused || current.parallel?.needsValidation) && <p className="task-wait-reason" role="status">{current.waitReason ? localizeError(current.waitReason) : current.parallel?.needsValidation ? t("前置成果已修改，需要重新验证") : t("已暂停")}</p>}
             {managed && current.mergeState && current.mergeState !== "none" && <p className="task-merge-state">{t("合入状态")} · {current.mergeState === "pending_review" ? t("等待审阅") : current.mergeState === "queued" ? t("等待合入") : current.mergeState === "merging" ? t("合入中") : current.mergeState === "merged" ? t("已合入") : t("需要处理")}</p>}
             <section className="activity-section">
-              <div className="activity-heading"><h2>{t("执行记录")}</h2><span>{current.runState ? RUN_STATE_LABELS[current.runState] : t("未运行")}</span></div>
+              <div className="activity-heading"><h2>{t("执行记录")}</h2><span>{planning ? planStatus(current) : current.runState ? RUN_STATE_LABELS[current.runState] : t("未运行")}</span></div>
               {current.activityError && <p className="activity-empty">{localizeError(current.activityError)}</p>}
               <div className="activity-stream">
                 {current.lastError && <div className="activity-entry"><span className="activity-rail-icon"><LinearIcon name="alert" /></span><p><strong>{t("执行错误")}</strong> {localizeError(current.lastError)}</p><time>{relativeTime(current.updatedAt)}</time></div>}
@@ -264,10 +282,11 @@ export function TaskDetail({
               {pendingInteractions.length > 0 && <div className="interaction-list">{pendingInteractions.filter(i => !current.plan?.hold || i.payload?.threadId !== current.plan?.threadId).map((interaction) => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</div>}
             </section>
             </div>
-            {!isGroup && current.threadId && ["in_progress", "in_review", "done"].includes(current.status) && <form className="task-followup" onPaste={event => { void addFiles(pastedFiles(event), true); }} onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
+            {planning && current.plan?.error && <p className="form-error" role="alert">{localizeError(current.plan.error)}</p>}
+            {planInteractions.length > 0 ? <div className="plan-interaction-composer">{planInteractions.map(interaction => ["user_input", "async_user_input"].includes(interaction.kind) || interaction.kind.toLowerCase().includes("requestuserinput") ? <PlanQuestions key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} /> : <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</div> : !isGroup && (planning || current.threadId && ["in_progress", "in_review", "done"].includes(current.status)) && <form className={`task-followup${planning ? " task-plan-composer" : ""}`} onPaste={event => { if (!planning) void addFiles(pastedFiles(event), true); }} onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
               {followupAttachments.length > 0 && <ul className="attachment-card-list task-followup-attachments">{followupAttachments.map(file => <AttachmentCard key={file.id} file={file} disabled={sending || saving || addingAttachments || removingAttachmentId !== null} onPreview={() => setPreviewFile(file)} onRemove={() => void removeFile(file.id)} />)}</ul>}
-              <textarea aria-label={t("跟进 Codex 会话")} placeholder={t("向 Codex 补充细节或继续处理…")} title={t("Enter 发送 · Shift+Enter 换行")} rows={2} value={followup} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendFollowup(); } }} />
-              <div className="task-followup-footer"><AttachmentButton iconOnly count={followupAttachments.length} disabled={sending || saving || addingAttachments || removingAttachmentId !== null} onAdd={files => void addFiles(files, true)} /><button className="task-followup-send" type="submit" aria-label={t("发送跟进消息")} title={sending ? t("正在发送…") : t("发送跟进消息")} aria-busy={sending} disabled={sending || saving || addingAttachments || removingAttachmentId !== null || (!followup.trim() && !followupAttachments.length)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg></button></div>
+              <textarea aria-label={planning ? t("补充计划要求") : t("跟进 Codex 会话")} placeholder={planning ? t("补充计划要求，或请 Codex 根据回答生成最终计划…") : t("向 Codex 补充细节或继续处理…")} title={t("Enter 发送 · Shift+Enter 换行")} rows={2} value={followup} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendFollowup(); } }} />
+              <div className="task-followup-footer">{planning ? null : <AttachmentButton iconOnly count={followupAttachments.length} disabled={sending || saving || addingAttachments || removingAttachmentId !== null} onAdd={files => void addFiles(files, true)} />}<button className="task-followup-send" type="submit" aria-label={planning ? t("发送补充") : t("发送跟进消息")} title={sending ? t("正在发送…") : planning ? t("发送补充") : t("发送跟进消息")} aria-busy={sending} disabled={sending || saving || planning && (planBusy || planStarting || !current.plan?.threadId) || addingAttachments || removingAttachmentId !== null || (!followup.trim() && !followupAttachments.length)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg></button></div>
               {addingAttachments && <p className="task-followup-status" role="status">{t("正在添加附件…")}</p>}
               {attachmentError && <p className="form-error" role="alert">{localizeError(attachmentError)}</p>}
             </form>}

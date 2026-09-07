@@ -1,3 +1,4 @@
+import { planStatus } from "./TaskPlan";
 import { t, localizeError } from "../i18n";
 import completeIcon from "../assets/figma-taskboard/card-complete.svg";
 import processingAnimation from "../assets/figma-taskboard/loading-16.svg";
@@ -39,9 +40,11 @@ export function TaskCard({
 }) {
   const blocked = task.status === "todo" && task.blockedBy.some((item) => item.status !== "done");
   const pendingInteraction = task.interactions?.some((interaction) => interaction.status === "pending");
-  const processing = task.status === "in_progress";
+  const planning = !!task.plan?.hold;
+  const processing = task.status === "in_progress" || planning;
+  const running = planning ? ["pending", "starting", "agent_running"].includes(task.plan?.state ?? "") && !pendingInteraction : task.runState === "running";
   const excerpt = markdownExcerpt(task.description);
-  const processingLabel = task.runState === "waiting_quota"
+  const processingLabel = planning ? planStatus(task) : task.runState === "waiting_quota"
     ? t("等待额度")
     : task.runState === "waiting_approval"
       ? t("等待批准")
@@ -54,9 +57,9 @@ export function TaskCard({
             : t("执行中");
   return (
     <article
-      className={`task-card task-card-main status-${task.status}${processing ? " is-processing-card" : ""}${processing && task.runState === "running" ? " is-running-card" : ""}${isDragging ? " is-dragging" : ""}${pendingInteraction ? " is-unread" : ""}`}
+      className={`task-card task-card-main status-${task.status}${processing ? " is-processing-card" : ""}${processing && running ? " is-running-card" : ""}${isDragging ? " is-dragging" : ""}${pendingInteraction ? " is-unread" : ""}`}
       data-task-id={task.id}
-      draggable={task.status !== "done" && task.status !== "canceled"}
+      draggable={!planning && task.status !== "done" && task.status !== "canceled"}
       aria-labelledby={`task-${task.id}-title`}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
@@ -87,9 +90,9 @@ export function TaskCard({
       {task.schedulingMode === "parallel" && <span className="task-parallel-badge">{t("允许并行")}</span>}
       {task.waitReason && <div className="task-card-execution">{localizeError(task.waitReason)}</div>}
       {processing && (
-        <div className={`task-processing-row${task.runState === "running" ? " is-running" : " is-paused"}`}>
-          {task.runState === "running" && <img className="task-processing-glyph" src={processingAnimation} alt="" aria-hidden="true" />}
-          <span className="task-processing-label">{processingLabel}{task.runState === "running" && task.updatedAt ? ` · ${elapsedTime(task.updatedAt)}` : ""}</span>
+        <div className={`task-processing-row${running ? " is-running" : " is-paused"}`}>
+          {running && <img className="task-processing-glyph" src={processingAnimation} alt="" aria-hidden="true" />}
+          <span className="task-processing-label">{processingLabel}{running && task.updatedAt ? ` · ${elapsedTime(task.updatedAt)}` : ""}</span>
           <span className="task-processing-spacer" aria-hidden="true" />
         </div>
       )}

@@ -66,7 +66,8 @@ class PlanningTests(unittest.IsolatedAsyncioTestCase):
             {"type": "agentMessage", "id": "final", "text": f"<proposed_plan>{final}</proposed_plan>"}]})
         current = self.db.get_task(self.task["id"])
         self.server.read_snapshots[op["payload"]["threadId"]] = {"thread": {"turns": [{"id": "plan-turn", "status": "completed"}]}}
-        await self.scheduler.action(current["id"], "plan_accept", current["version"])
+        self.assertFalse(current["plan"]["hold"])
+        self.assertEqual(current["plan"]["state"], "confirmed")
         reopened = Database(self.path)
         try:
             self.assertEqual(reopened.get_task(current["id"])["plan"]["acceptedText"], final.strip())
@@ -93,6 +94,12 @@ class PlanningTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_task(current["id"])["plan"]["text"], "New final")
         with self.assertRaises(ValidationError):
             await self.scheduler.action(current["id"], "plan_accept", self.db.get_task(current["id"])["version"])
+        interaction = self.db.pending_interactions()[0]
+        self.db.resolve_interaction(interaction["id"], interaction["version"], {"resolvedInCodex": True})
+        await self.planning.recover()
+        saved = self.db.get_task(current["id"])
+        self.assertFalse(saved["plan"]["hold"])
+        self.assertEqual(saved["plan"]["acceptedText"], "New final")
 
     async def test_async_answer_steers_then_continues_plan_without_blocking_or_double_send(self):
         op = await self.start_plan()
@@ -205,3 +212,62 @@ class PlanningTests(unittest.IsolatedAsyncioTestCase):
             await self.scheduler.action(current["id"], "plan_accept", current["version"])
         await self.scheduler.action(current["id"], "plan_continue", current["version"], "Update it")
         self.assertIn("New requirements", self.server.start_turn.await_args.args[1])
+
+    async def test_draft_plan_edits_survive_replay_and_feed_execution(self):
+        self.task = self.db.update_task(self.task["id"], self.task["version"], priority="draft")
+        op = await self.start_plan()
+        thread = op["payload"]["threadId"]
+        turn = {"id": "plan-turn", "status": "completed", "items": [{"type": "plan", "id": "final", "text": "Native proposal"}]}
+        self.server.read_snapshots[thread] = {"thread": {"turns": [turn]}}
+        await self.planning.observe(op, turn)
+        current = self.db.get_task(self.task["id"])
+        self.assertEqual(current["priority"], "draft")
+        self.assertIsNone(self.db.claim_candidate(current["id"]))
+        saved = await self.scheduler.action(current["id"], "plan_save", current["version"], "Edited plan")
+        self.assertGreater(saved["version"], current["version"])
+        with self.assertRaises(ConflictError):
+            await self.scheduler.action(current["id"], "plan_save", current["version"], "Stale edit")
+        await self.planning.recover()
+        current = self.db.get_task(current["id"])
+        self.assertEqual(current["plan"]["text"], "Edited plan")
+        self.assertFalse(current["plan"]["hold"])
+        current = await self.scheduler.action(current["id"], "plan_save", current["version"], "Edited after confirmation")
+        self.assertEqual(current["plan"]["acceptedText"], "Edited after confirmation")
+        self.assertIsNone(self.db.claim_candidate(current["id"]))
+        reopened = Database(self.path)
+        try:
+            self.assertIn("Edited after confirmation", reopened.plan_prompt(current["id"]))
+        finally:
+            reopened.close()
+        await self.scheduler.parallel.execution_turn(current, "execution-thread", "Implement", {})
+        self.assertIn("Edited after confirmation", self.server.start_turn.await_args.args[1])
+        self.assertNotIn("plan", self.server.start_turn.await_args.kwargs)
+
+    async def test_plan_edit_rejects_empty_running_and_native_continuation(self):
+        op = await self.start_plan()
+        current = self.db.get_task(self.task["id"])
+        with self.assertRaises(ValidationError):
+            await self.scheduler.action(current["id"], "plan_save", current["version"], "Too early")
+        self.planning.save(op, "ready", text="Final")
+        thread = op["payload"]["threadId"]
+        current = self.db.get_task(current["id"])
+        with self.assertRaises(ValidationError):
+            await self.scheduler.action(current["id"], "plan_save", current["version"], "  ")
+        self.server.read_snapshots[thread] = {"thread": {"turns": [{"id": "next-turn", "status": "inProgress"}]}}
+        with self.assertRaises(ConflictError):
+            await self.scheduler.action(current["id"], "plan_save", current["version"], "Outdated edit")
+
+    async def test_planning_history_refreshes_without_execution_thread(self):
+        op = await self.start_plan()
+        thread = op["payload"]["threadId"]
+        self.server.read_snapshots[thread] = {"thread": {"turns": [{"id": "plan-turn", "status": "inProgress", "items": [
+            {"type": "agentMessage", "id": "progress", "text": "Inspecting the project"}]}]}}
+        task = self.db.get_task(self.task["id"])
+        self.assertIsNone(task["threadId"])
+        await self.scheduler.hydrate_activity(task)
+        self.assertEqual(self.db.list_activity(task["id"])[0]["message"], "Inspecting the project")
+        self.server.read_snapshots[thread]["thread"]["turns"][0]["items"][0]["text"] = "Preparing the plan"
+        self.scheduler.parallel.publish = AsyncMock()
+        await self.planning.recover()
+        self.assertEqual(self.db.list_activity(task["id"])[0]["message"], "Preparing the plan")
+        self.scheduler.parallel.publish.assert_awaited()

@@ -39,6 +39,31 @@ class TaskPlanning:
                                            title=current["title"], description=current["description"])
                 self.db.set_parallel(current["id"], planHold=True, planOperation=op["id"])
                 self.scheduler.parallel.spawn("task-plan:" + op["id"], self.start(op))
+            elif action == "plan_save":
+                if not current["plan"]["hold"]:
+                    op = self.db.operation(current["parallel"].get("acceptedPlan") or "")
+                if current["status"] != "todo" or current["queued"]:
+                    raise ValidationError("仅未排队的待认领任务可以编辑计划")
+                if current["parentId"]:
+                    self.db.require_group_editable(current["parentId"])
+                if not op or op["state"] not in {"ready", "confirmed"}:
+                    raise ValidationError("请等待最终计划生成后再编辑")
+                if not text or not text.strip():
+                    raise ValidationError("计划内容不能为空")
+                thread = op["payload"].get("threadId")
+                if thread:
+                    await self.scheduler._ensure_server()
+                    latest = latest_turn(await self.server.read_thread(thread, include_turns=True))
+                    if latest.get("id") != op["payload"].get("turnId") or latest.get("status") in ACTIVE:
+                        raise ConflictError("计划会话已变化，请刷新后编辑")
+                if self.pending(op):
+                    raise ValidationError("请先回答计划中的待处理问题")
+                if self.db.get_task(current["id"])["version"] != current["version"]:
+                    raise ConflictError("任务已变化，请刷新后编辑计划")
+                # Preserve the native proposal; local edits must survive history replay.
+                with self.db.transaction(immediate=True):
+                    self.save(op, op["state"], editedText=text.strip())
+                    self.db.set_parallel(current["id"])
             elif not op or not current["plan"]["hold"]:
                 raise ValidationError("当前任务没有待处理的计划")
             elif action == "plan_continue":
@@ -157,7 +182,7 @@ class TaskPlanning:
         except Exception as exc:
             self.save(op, "uncertain", error=str(exc))
             raise
-        self.save(op, "agent_running", turnId=turn, text=None)
+        self.save(op, "agent_running", turnId=turn, text=None, editedText=None)
         await self.scheduler.parallel.publish(task["id"])
 
     async def recover(self):
@@ -182,12 +207,13 @@ class TaskPlanning:
                     await self.server.resume_thread(thread)
                     self.subscribed.add(thread)
                 before = self.db.list_interactions(op["task_id"])
+                activity_before = self.db.list_activity(op["task_id"])
                 snapshot = await self.server.read_thread(thread, include_turns=True)
                 for turn in snapshot.get("thread", {}).get("turns", []):
                     for item in turn.get("items", []):
                         self.scheduler._record_item(op["task_id"], turn["id"], item, turn.get("status") not in ACTIVE,
                                                     thread_id=thread)
-                if before != self.db.list_interactions(op["task_id"]):
+                if before != self.db.list_interactions(op["task_id"]) or activity_before != self.db.list_activity(op["task_id"]):
                     await self.scheduler.parallel.publish(op["task_id"])
                 latest = latest_turn(snapshot)
                 if op["state"] == "uncertain" and latest.get("id") == op["payload"].get("previousTurnId"):
@@ -205,6 +231,8 @@ class TaskPlanning:
         status = turn.get("status")
         state = "agent_running" if status in ACTIVE else "conversation"
         payload = {"turnId": turn.get("id"), "error": None}
+        if turn.get("id") != op["payload"].get("turnId"):
+            payload.update(text=None, editedText=None)
         if status in {"failed", "interrupted"}:
             state = "blocked"
             payload["error"] = str(turn.get("error") or "计划回合已中断，可补充要求后继续")
@@ -221,6 +249,18 @@ class TaskPlanning:
             if text.strip():
                 state = "ready"
                 payload["text"] = text.strip()
+        if state == "ready" and not self.pending(op):
+            task = self.db.get_task(op["task_id"])
+            if task["title"] == op["payload"].get("title") and task["description"] == op["payload"].get("description"):
+                # A completed native proposal is the saved execution plan. No second
+                # confirmation is needed; drafts remain excluded from dispatch.
+                with self.db.transaction(immediate=True):
+                    self.save(op, "confirmed", **payload)
+                    self.db.set_parallel(task["id"], acceptedPlan=op["id"], planHold=False, waitReason=None)
+                await self.scheduler.parallel.publish(task["id"])
+                return
+            state = "blocked"
+            payload["error"] = "任务要求已修改，请发送补充让计划同步"
         if state != op["state"] or any(op["payload"].get(k) != v for k, v in payload.items()):
             self.save(op, state, **payload)
             await self.scheduler.parallel.publish(op["task_id"])

@@ -270,7 +270,7 @@ export async function replaceDependencies(id: string, version: number, blockedBy
 }
 
 export type TaskAction =
-  | "plan_start" | "plan_continue" | "plan_accept" | "plan_cancel"
+  | "plan_start" | "plan_continue" | "plan_accept" | "plan_cancel" | "plan_save"
   | "run"
   | "follow_up"
   | "interrupt_requeue"

@@ -77,7 +77,8 @@ class ParallelDatabase:
                 "operationId": operation["id"] if operation else None,
                 "state": operation["state"] if operation else None,
                 **(operation["payload"] if operation else {}),
-                "acceptedText": accepted["payload"].get("text") if accepted else None}
+                "text": (operation["payload"].get("editedText") or operation["payload"].get("text")) if operation else None,
+                "acceptedText": (accepted["payload"].get("editedText") or accepted["payload"].get("text")) if accepted else None}
 
     def plan_prompt(self, task_id: str) -> str:
         task = self.get_task(task_id)
