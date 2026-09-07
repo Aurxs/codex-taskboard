@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { Task } from "../types";
 import type { TaskAction } from "../api";
 import { t } from "../i18n";
@@ -28,14 +28,19 @@ export function TaskPlanButton({ task, disabled, onAction }: PlanProps) {
 
 export function TaskPlan({ task, disabled, onAction }: PlanProps) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
   const plan = task.plan;
   const text = plan?.hold ? (plan.state === "ready" ? plan.text : null) : plan?.acceptedText;
   if (!text) return null;
   const editable = task.status === "todo" && !task.queued && (plan?.hold ? plan.state === "ready" : !!plan?.acceptedText);
-  return <section className="task-plan-document" aria-label={t("任务计划")}>
+  return <section className={`task-plan-document${expanded ? " is-expanded" : ""}`} aria-label={t("任务计划")}>
+    <button type="button" className="task-plan-expand" aria-label={expanded ? t("收起计划") : t("展开计划")} title={expanded ? t("收起计划") : t("展开计划")} aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(value => !value)}>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{expanded ? <path d="M14 2 9 7m0-4v4h4M2 14l5-5m-4 0h4v4" /> : <path d="m9 7 5-5m-4 0h4v4M7 9l-5 5m0-4v4h4" />}</svg>
+    </button>
     {draft !== null ? <>
-      <textarea className="task-plan-editor" aria-label={t("编辑计划")} value={draft} disabled={disabled} onChange={e => setDraft(e.target.value)} autoFocus />
+      <textarea id={contentId} className="task-plan-editor" aria-label={t("编辑计划")} value={draft} disabled={disabled} onChange={e => setDraft(e.target.value)} autoFocus />
       <div className="interaction-actions"><button type="button" className="quiet-button" disabled={disabled} onClick={() => setDraft(null)}>{t("取消")}</button><button type="button" className="primary-button" disabled={disabled || !draft.trim()} onClick={async () => { if (await onAction("plan_save", draft)) setDraft(null); }}>{t("保存计划")}</button></div>
-    </> : <div className="task-plan-content" role={editable ? "button" : undefined} tabIndex={0} aria-label={editable ? t("编辑计划") : t("最终计划")} aria-disabled={editable && disabled} onClick={() => { if (editable && !disabled) setDraft(text); }} onKeyDown={e => { if (editable && !disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setDraft(text); } }}><pre>{text}</pre></div>}
+    </> : <div id={contentId} className="task-plan-content" role={editable ? "button" : undefined} tabIndex={0} aria-label={editable ? t("编辑计划") : t("最终计划")} aria-disabled={editable && disabled} onClick={() => { if (editable && !disabled) setDraft(text); }} onKeyDown={e => { if (editable && !disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setDraft(text); } }}><pre>{text}</pre></div>}
   </section>;
 }

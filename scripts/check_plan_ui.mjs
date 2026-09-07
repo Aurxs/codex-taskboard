@@ -117,8 +117,13 @@ try {
   await refresh();
   const document = ui.locator('.task-plan-document');
   await document.waitFor();
-  assert.ok(await ui.locator('.task-plan-content').evaluate(el => el.clientHeight <= 360 && el.scrollHeight > el.clientHeight));
+  assert.ok(await ui.locator('.task-plan-content').evaluate(el => el.clientHeight <= 88 && el.scrollHeight > el.clientHeight));
   assert.ok(await document.evaluate(el => el.previousElementSibling.classList.contains('property-row')));
+  await document.getByRole('button', { name: '展开计划', exact: true }).click();
+  assert.ok(await ui.locator('.task-plan-content').evaluate(el => el.clientHeight > 88 && el.clientHeight <= 480));
+  assert.equal(await ui.getByRole('textbox', { name: '编辑计划', exact: true }).count(), 0, 'expanding does not open the editor');
+  await document.getByRole('button', { name: '收起计划', exact: true }).click();
+  assert.ok(await ui.locator('.task-plan-content').evaluate(el => el.clientHeight <= 88));
   await ui.getByRole('button', { name: '编辑计划', exact: true }).click();
   const editor = ui.getByRole('textbox', { name: '编辑计划', exact: true });
   await editor.fill('手工调整后的计划\n\n' + task.plan.text);

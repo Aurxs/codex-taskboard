@@ -1,5 +1,7 @@
 // Chinese source strings are stable message keys; placeholders are positional.
 export const en = {
+  "展开计划": "Expand plan",
+  "收起计划": "Collapse plan",
   "发送": "Send",
   "否，并告诉 ChatGPT 应该如何做得不同": "No, and tell ChatGPT what to do differently",
   "跳过": "Skip",

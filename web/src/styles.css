@@ -12310,12 +12310,12 @@ button.attachment-card-content { cursor: pointer; }
 }
 
 .task-plan-trigger:disabled { opacity: .6; cursor: default; }
-.task-plan-document { margin: 16px 0 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-raised); }
-.task-plan-content, .task-plan-editor { max-height: min(360px, 45vh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.task-plan-document { --plan-content-height: 88px; position: relative; margin: 16px 0 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-raised); }
+.task-plan-content, .task-plan-editor { max-height: var(--plan-content-height); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .task-plan-content[role="button"] { cursor: text; }
 .task-plan-content:focus-visible { outline: 2px solid var(--border); outline-offset: 3px; border-radius: 6px; }
 .task-plan-content pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.7; }
-.task-plan-editor { box-sizing: border-box; display: block; width: 100%; height: min(360px, 45vh); padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 1.7; resize: none; }
+.task-plan-editor { box-sizing: border-box; display: block; width: 100%; height: var(--plan-content-height); padding: 8px 32px 8px 8px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 1.7; resize: none; }
 .task-plan-document .interaction-actions { margin-top: 12px; }
 .plan-interaction-composer { flex-shrink: 0; max-height: min(480px, 55vh); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: 20px; background: var(--surface-raised); }
 .plan-interaction-composer .interaction-card { border: 0; border-radius: 0; margin: 0; padding: 16px; }
@@ -12355,3 +12355,10 @@ fieldset.interaction-question { min-width: 0; border: 0; padding: 0; margin: 14p
 .task-plan-composer .task-followup-footer { justify-content: flex-end; }
 
 .plan-question-next-icon { transform: rotate(180deg); }
+
+.task-plan-document.is-expanded { --plan-content-height: min(480px, 60vh); }
+.task-plan-content { padding-right: 28px; }
+.task-plan-expand { position: absolute; top: 6px; right: 6px; z-index: 1; display: grid; place-items: center; width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 6px; background: var(--surface-raised); color: var(--text-tertiary); cursor: pointer; }
+.task-plan-expand svg { width: 16px; height: 16px; }
+.task-plan-expand:hover { background: var(--surface-hover); color: var(--text-primary); }
+.task-plan-expand:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 2px; }
