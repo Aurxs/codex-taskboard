@@ -395,6 +395,7 @@ class Scheduler:
                 raise ValidationError("跟进消息不能为空")
             if not task["threadId"] or task["status"] not in {"in_progress", "in_review", "done"}:
                 raise ValidationError("当前任务没有可跟进的 Codex 会话")
+            text = text.strip() + self.db.attachment_prompt(task_id)
             await self._ensure_server()
             snapshot = await self.server.read_thread(task["threadId"], include_turns=True)
             turns = snapshot.get("thread", {}).get("turns", [])

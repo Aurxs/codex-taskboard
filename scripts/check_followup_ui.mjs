@@ -26,7 +26,11 @@ try {
       return route.fulfill({ headers, json: task });
     }
     if (url.pathname === '/api/tasks/task') {
-      if (route.request().method() === 'PATCH') Object.assign(task, route.request().postDataJSON(), { version: task.version + 1 });
+      if (route.request().method() === 'PATCH') {
+        const { attachments = [], removeAttachmentIds = [], ...changes } = route.request().postDataJSON();
+        task.attachments = [...(task.attachments ?? []).filter(file => !removeAttachmentIds.includes(file.id)), ...attachments.map(file => ({ id: `file-${task.version}-${file.name}`, name: file.name, size: Buffer.from(file.content, 'base64').length }))];
+        Object.assign(task, changes, { version: task.version + 1 });
+      }
       return route.fulfill({ headers, json: task });
     }
     if (url.pathname.startsWith('/api/')) return route.fulfill({ headers, json: { tasks: [task] } });
@@ -52,8 +56,9 @@ try {
   await composer.waitFor();
   const box = await composer.boundingBox();
   const form = ui.locator('.task-followup');
-  assert.ok((await form.boundingBox()).height <= 96, 'composer uses a compact height');
-  assert.equal(await form.evaluate(el => getComputedStyle(el).margin), '0px', 'no outer composer spacer');
+  assert.ok((await form.boundingBox()).height <= 150, 'composer uses a compact height');
+  assert.notEqual(await form.evaluate(el => getComputedStyle(el).boxShadow), 'none', 'composer has a subtle surrounding shadow');
+  assert.equal(await form.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)', 'composer uses the white raised surface');
   assert.equal(await composer.evaluate(el => getComputedStyle(el).resize), 'none', 'no resize handle');
   assert.equal(await ui.getByRole('button', { name: '发送跟进消息' }).isDisabled(), true);
   await composer.fill('第一行');
@@ -62,7 +67,7 @@ try {
   assert.equal(await composer.inputValue(), '第一行\na');
   await composer.fill('多行内容\n'.repeat(20));
   assert.ok(await composer.evaluate(el => el.scrollHeight > el.clientHeight), 'long messages scroll inside composer');
-  assert.ok((await form.boundingBox()).height <= 96, 'long drafts keep composer compact');
+  assert.ok((await form.boundingBox()).height <= 150, 'long drafts keep composer compact');
   await composer.fill('');
   await ui.locator('.issue-detail-main-scroll').evaluate(el => { el.scrollTop = el.scrollHeight; });
   assert.deepEqual(await composer.boundingBox(), box, 'composer stays fixed while history scrolls');
@@ -76,6 +81,7 @@ try {
   await ui.getByRole('button', { name: '发送跟进消息' }).click();
   await ui.locator('.notice-error').waitFor();
   assert.equal(await composer.inputValue(), '保留这条补充');
+  await page.frames()[1].waitForFunction(() => !document.querySelector('.task-followup-send').disabled);
   fail = false;
   await composer.press('Enter');
   await page.waitForFunction(() => document.querySelector('iframe') != null);
@@ -83,6 +89,25 @@ try {
   await page.frames()[1].waitForFunction(() => document.querySelector('.task-followup textarea').value === '');
   assert.equal(submitted.action, 'follow_up');
   assert.equal(submitted.feedback, '保留这条补充');
+  await form.locator('input[type=file]').setInputFiles({ name: 'context.txt', mimeType: 'text/plain', buffer: Buffer.from('context') });
+  await form.getByText('context.txt', { exact: true }).waitFor();
+  await composer.evaluate(el => {
+    const clipboardData = new DataTransfer();
+    clipboardData.items.add(new File(['notes'], 'notes.md', { type: 'text/markdown' }));
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  });
+  await form.getByText('notes.md', { exact: true }).waitFor();
+  await form.getByRole('button', { name: '移除 notes.md' }).click();
+  await form.getByText('notes.md', { exact: true }).waitFor({ state: 'hidden' });
+  fail = true;
+  await form.getByRole('button', { name: '发送跟进消息' }).click();
+  await ui.locator('.notice-error').waitFor();
+  assert.ok(await form.getByText('context.txt', { exact: true }).isVisible(), 'failed sends retain attachments');
+  await page.frames()[1].waitForFunction(() => !document.querySelector('.task-followup-send').disabled);
+  fail = false;
+  await composer.press('Enter');
+  await form.getByText('context.txt', { exact: true }).waitFor({ state: 'hidden' });
+  assert.equal(submitted.feedback, '请查看附件。', 'attachment-only follow-up is sent');
   await ui.getByRole('button', { name: '在 Codex 中打开' }).click();
   await page.waitForFunction(() => window.messages.some(m => m.type === 'taskboard:open-thread' && m.payload.threadId === 'thread-fixture'));
   for (const status of ['in_review', 'done']) {

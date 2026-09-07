@@ -1,3 +1,4 @@
+import { LinearIcon } from "./LinearIcon";
 import { t } from "../i18n";
 import { useRef, type ClipboardEvent } from "react";
 import type { AttachmentInput } from "../types";
@@ -25,10 +26,10 @@ export function readAttachments(files: File[]): Promise<AttachmentInput[]> {
   })));
 }
 
-export function AttachmentButton({ count, disabled, onAdd }: { count: number; disabled: boolean; onAdd: (files: File[]) => void }) {
+export function AttachmentButton({ count, disabled, onAdd, iconOnly = false }: { iconOnly?: boolean; count: number; disabled: boolean; onAdd: (files: File[]) => void }) {
   const input = useRef<HTMLInputElement>(null);
   return <>
-    <button className="property-control attachment-trigger" type="button" disabled={disabled} onClick={() => input.current?.click()} title={t("添加图片、Markdown、PDF 或 Office 文档；也可在内容区域直接粘贴")}>{t("添加附件")} <span aria-live="polite">{count}</span></button>
+    <button className={iconOnly ? "task-followup-attach" : "property-control attachment-trigger"} aria-label={t("添加附件")} type="button" disabled={disabled} onClick={() => input.current?.click()} title={t("添加图片、Markdown、PDF 或 Office 文档；也可在内容区域直接粘贴")}>{iconOnly ? <LinearIcon name="plus" /> : <>{t("添加附件")} <span aria-live="polite">{count}</span></>}</button>
     <input ref={input} type="file" hidden multiple accept=".png,.jpg,.jpeg,.gif,.webp,.md,.markdown,.txt,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx" disabled={disabled} onChange={event => {
       const files = Array.from(event.target.files ?? []);
       event.target.value = "";
