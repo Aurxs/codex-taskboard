@@ -93,12 +93,13 @@ try {
   await question.waitFor();
   assert.equal(await composer.count(), 0, 'questions replace the composer');
   assert.ok(await ui.locator('.activity-stream').getByText('正在检查项目并整理计划步骤', { exact: true }).isVisible());
-  await question.getByRole('radio', { name: /当前页面/ }).click();
-  assert.equal(await question.getByRole('radio', { name: /当前页面/ }).getAttribute('aria-checked'), 'true');
+  assert.ok(await question.getByRole('button', { name: /当前页面/ }).evaluate(el => el.classList.contains('is-active')));
+  assert.ok(await question.getByText('1 of 2', { exact: true }).isVisible());
   await capture('question');
-  await question.getByRole('button', { name: '下一题', exact: true }).click();
+  await question.getByRole('button', { name: /当前页面/ }).click();
+  await question.getByText('2 of 2', { exact: true }).waitFor();
   await question.getByRole('textbox', { name: '计划卡片高度？', exact: true }).fill('360px，支持滚动');
-  await question.getByRole('button', { name: '提交回答', exact: true }).click();
+  await question.getByRole('button', { name: '发送', exact: true }).click();
   await composer.waitFor();
   assert.equal(await composer.inputValue(), '保留输入草稿');
   assert.deepEqual(submitted.response.answers, { scope: { answers: ['当前页面'] }, height: { answers: ['360px，支持滚动'] } });

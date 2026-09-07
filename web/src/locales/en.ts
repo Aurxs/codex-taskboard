@@ -1,11 +1,11 @@
 // Chinese source strings are stable message keys; placeholders are positional.
 export const en = {
+  "发送": "Send",
+  "否，并告诉 ChatGPT 应该如何做得不同": "No, and tell ChatGPT what to do differently",
+  "跳过": "Skip",
   "正在保存计划…": "Saving plan…",
   "任务要求已修改，请发送补充让计划同步": "Requirements changed. Send a follow-up to update the plan",
   "问题导航": "Question navigation",
-  "查看下一题": "View next question",
-  "或者，输入其他答案…": "Or enter a different answer…",
-  "输入你的回答…": "Enter your answer…",
   "开始计划": "Start plan",
   "正在执行计划模式": "Running plan mode",
   "计划模式 · 等待回应": "Plan mode · Awaiting response",
