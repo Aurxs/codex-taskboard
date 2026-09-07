@@ -116,8 +116,9 @@ class AppServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             initialize = next(item for item in seen if item["method"] == "initialize")
             self.assertEqual(
                 set(initialize["params"]),
-                {"clientInfo"},
+                {"clientInfo", "capabilities"},
             )
+            self.assertEqual(initialize["params"]["capabilities"], {"experimentalApi": True})
             start = next(item for item in seen if item["method"] == "thread/start")
             self.assertEqual(start["params"], {"cwd": "/tmp/codex-project"})
             name = next(item for item in seen if item["method"] == "thread/name/set")

@@ -12302,3 +12302,13 @@ button.attachment-card-content { cursor: pointer; }
 .app-shell.embedded .home-window-drag-region {
   right: var(--codex-titlebar-right-inset, 0px);
 }
+
+.task-plan-section { margin: 12px 0 24px; padding: 18px; border: 1px solid var(--border-color, #dddddd40); border-radius: 10px; }
+.task-plan-section .activity-heading { gap: 12px; flex-wrap: wrap; }
+.task-plan-document { margin: 14px 0; }
+.task-plan-document pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; max-height: 480px; overflow: auto; }
+.plan-followup, .interaction-question textarea { display: block; width: 100%; min-height: 76px; margin: 12px 0; padding: 10px; border: 1px solid var(--border-color, #dddddd40); border-radius: 6px; background: transparent; color: inherit; font: inherit; resize: vertical; box-sizing: border-box; }
+fieldset.interaction-question { min-width: 0; border: 0; padding: 0; margin: 14px 0; }
+.question-option { display: flex; align-items: start; gap: 8px; padding: 6px 0; }
+.interaction-question .question-option input { width: auto; min-height: auto; flex: none; margin-top: 4px; }
+.question-option small { display: block; opacity: .7; }

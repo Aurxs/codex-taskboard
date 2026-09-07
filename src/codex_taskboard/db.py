@@ -650,6 +650,8 @@ class Database(ParallelDatabase):
                 raise NotFoundError(f"Project {project_id} was not found")
             if int(row["version"]) != expected_version:
                 raise ConflictError("Project changed; refresh before deleting")
+            if any(task["plan"]["hold"] for task in self.list_tasks(project_id)):
+                raise ValidationError("请先取消项目中的任务计划再删除")
             self._conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
 
     # ------------------------------------------------------------------
@@ -1118,6 +1120,8 @@ class Database(ParallelDatabase):
     def delete_task(self, task_id: str, expected_version: int) -> None:
         with self.transaction(immediate=True):
             task = self.get_task(task_id)
+            if task["plan"]["hold"]:
+                raise ValidationError("请先取消任务计划再删除")
             if task["parentId"]:
                 self.require_group_editable(task["parentId"])
                 if task["threadId"] or task["worktreePath"]:
@@ -1346,6 +1350,19 @@ class Database(ParallelDatabase):
                 ),
             )
             return self._interaction_json_locked(interaction_id)
+
+    def save_partial_answers(self, interaction_id: str, answers: dict[str, Any]) -> None:
+        with self.transaction(immediate=True):
+            interaction = self.get_interaction(interaction_id)
+            if interaction["status"] != "pending":
+                return
+            response = {"answers": answers}
+            if interaction["response"] == response:
+                return
+            self._conn.execute(
+                "UPDATE interactions SET response=?, version=version+1, updated_at=? WHERE id=?",
+                (_json(response), utc_now(), interaction_id),
+            )
 
     def pending_interactions(self) -> list[dict[str, Any]]:
         with self._lock:

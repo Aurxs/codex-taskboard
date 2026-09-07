@@ -1,4 +1,5 @@
 import { ActivityTool, ActivityToolIcon } from "./ActivityTool";
+import { TaskPlan } from "./TaskPlan";
 import { GroupTasks } from "./GroupTasks";
 import { getTask, type TaskAction } from "../api";
 import { t, getLocale, localizeError } from "../i18n";
@@ -44,13 +45,13 @@ function InteractionRow({ interaction, onResolve }: { interaction: Interaction; 
   const [busy, setBusy] = useState(false);
   const questions = interaction.questions ?? [];
   const kind = interaction.kind.toLowerCase();
-  const userInput = kind === "user_input" || kind.includes("requestuserinput");
+  const userInput = kind === "user_input" || kind === "async_user_input" || kind.includes("requestuserinput");
   const permission = kind.includes("permission");
   const approval = !permission && !userInput;
   async function resolve(decision: string) {
     setBusy(true);
     try {
-      const response = userInput
+      const response = decision === "cancel" ? { decision: "cancel" } : userInput
         ? { answers: Object.fromEntries(questions.map((question, index) => [question.id ?? String(index), { answers: answer[question.id ?? String(index)] ? [answer[question.id ?? String(index)]] : [] }])) }
         : permission
           ? { permissions: (decision === "accept" || decision === "acceptForSession") ? interaction.payload?.permissions ?? {} : {}, scope: decision === "acceptForSession" ? "session" : "turn" }
@@ -64,12 +65,22 @@ function InteractionRow({ interaction, onResolve }: { interaction: Interaction; 
     <div className="interaction-card">
       <div className="interaction-heading"><span className="interaction-icon">{userInput ? "?" : "!"}</span><div><strong>{interaction.title ?? (userInput ? t("Codex 需要你的回答") : t("Codex 请求批准"))}</strong><small>{interaction.message ?? interaction.command ?? t("请确认这个请求")}</small></div></div>
       {interaction.permissionScope && <div className="scope-list">{interaction.permissionScope.map((scope) => <code key={scope}>{scope}</code>)}</div>}
-      {questions.map((question, index) => <label className="interaction-question" key={question.id ?? String(index)}><span>{question.header ?? question.question}</span><input value={answer[question.id ?? String(index)] ?? ""} onChange={(event) => setAnswer((current) => ({ ...current, [question.id ?? String(index)]: event.target.value }))} placeholder={question.question} /></label>)}
+      {questions.map((question, index) => {
+        const id = question.id ?? String(index);
+        return <fieldset className="interaction-question" key={id} disabled={busy}>
+          <legend>{question.header && <strong>{question.header} · </strong>}{question.question}</legend>
+          {question.options?.map(option => <label className="question-option" key={option.label}>
+            <input type="radio" name={`${interaction.id}-${id}`} checked={answer[id] === option.label} onChange={() => setAnswer(current => ({ ...current, [id]: option.label }))} />
+            <span>{option.label}{option.description && <small>{option.description}</small>}</span>
+          </label>)}
+          <textarea aria-label={question.question} value={answer[id] ?? ""} onChange={event => setAnswer(current => ({ ...current, [id]: event.target.value }))} placeholder={t("输入你的回答或补充说明…")} />
+        </fieldset>;
+      })}
       <div className="interaction-actions approval-actions">
         <button className="quiet-button" type="button" disabled={busy} onClick={() => void resolve("cancel")}>{t("取消")}</button>
         {(approval || permission) && <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve("decline")}>{t("拒绝")}</button>}
         {(approval || permission) && <button className="secondary-button" type="button" disabled={busy} onClick={() => void resolve("acceptForSession")}>{t("当前会话批准")}</button>}
-        <button className="primary-button" type="button" disabled={busy} onClick={() => void resolve(userInput ? "submit" : "accept")}>{userInput ? t("提交回答") : permission ? t("批准权限") : t("本次批准")}</button>
+        <button className="primary-button" type="button" disabled={busy || (userInput && questions.some((question, index) => !answer[question.id ?? String(index)]?.trim()))} onClick={() => void resolve(userInput ? "submit" : "accept")}>{userInput ? t("提交回答") : permission ? t("批准权限") : t("本次批准")}</button>
       </div>
     </div>
   );
@@ -226,6 +237,7 @@ export function TaskDetail({
                 {attachmentError && <p className="form-error" role="alert">{localizeError(attachmentError)}</p>}
               </div>
             </div>
+            {!isGroup && <TaskPlan task={current} disabled={saving || editingDescription} onAction={async (action, text) => { const next = await onAction(current, action, text); if (next) setCurrent(next); return next; }}>{current.plan?.hold && pendingInteractions.filter(i => i.payload?.threadId === current.plan?.threadId).map(interaction => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</TaskPlan>}
             {isGroup && <GroupTasks group={current} onRefresh={refreshCurrent} onOpen={onOpenTask} />}
             {(current.waitReason || paused || current.parallel?.needsValidation) && <p className="task-wait-reason" role="status">{current.waitReason ? localizeError(current.waitReason) : current.parallel?.needsValidation ? t("前置成果已修改，需要重新验证") : t("已暂停")}</p>}
             {managed && current.mergeState && current.mergeState !== "none" && <p className="task-merge-state">{t("合入状态")} · {current.mergeState === "pending_review" ? t("等待审阅") : current.mergeState === "queued" ? t("等待合入") : current.mergeState === "merging" ? t("合入中") : current.mergeState === "merged" ? t("已合入") : t("需要处理")}</p>}
@@ -243,7 +255,7 @@ export function TaskDetail({
                 {[...(current.runs ?? [])].reverse().map((run, index) => <div className="activity-entry" key={run.id ?? `run-${index}`}><span className="activity-rail-icon"><LinearIcon name="terminal" /></span><p><strong>TaskRun</strong> {run.lastOutputSummary ?? run.summary ?? run.phase ?? run.runState ?? run.state ?? t("运行记录")}</p><time>{relativeTime(run.updatedAt ?? run.createdAt)}</time></div>)}
                 {current.lastError == null && current.lastMessage == null && (current.activity ?? []).length === 0 && (!current.runs || current.runs.length === 0) && <p className="activity-empty">{t("Codex 开始工作后，最新进展会显示在这里。")}</p>}
               </div>
-              {pendingInteractions.length > 0 && <div className="interaction-list">{pendingInteractions.map((interaction) => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</div>}
+              {pendingInteractions.length > 0 && <div className="interaction-list">{pendingInteractions.filter(i => !current.plan?.hold || i.payload?.threadId !== current.plan?.threadId).map((interaction) => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</div>}
             </section>
             </div>
             {!isGroup && current.threadId && ["in_progress", "in_review", "done"].includes(current.status) && <form className="task-followup" onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
@@ -260,7 +272,7 @@ export function TaskDetail({
                 {(current.groupPhase === "submitted" || current.groupPhase === "pausing") && !["done", "canceled"].includes(current.status) && <button className="detail-copy-action" type="button" onClick={() => void onAction(current, "group_pause")}>{current.groupPhase === "pausing" ? t("确认暂停") : t("暂停任务组")}</button>}
                 {current.groupPhase === "paused" && current.status !== "canceled" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "group_resume")}>{t("继续任务组")}</button>}
               </> : <>
-                {current.status === "todo" && !paused && !current.parentId && <button className="detail-open-thread-action" type="button" disabled={!current.ready || saving || current.queued} onClick={() => void onAction(current, "run")}><LinearIcon name="play" />{current.queued ? t("已排队") : current.priority === "draft" ? t("草稿暂不执行") : current.ready ? t("立即交给 Codex") : t("等待前置任务完成")}</button>}
+                {current.status === "todo" && !paused && !current.parentId && <button className="detail-open-thread-action" type="button" disabled={!current.ready || saving || current.queued || current.plan?.hold} onClick={() => void onAction(current, "run")}><LinearIcon name="play" />{current.queued ? t("已排队") : current.priority === "draft" ? t("草稿暂不执行") : current.ready ? t("立即交给 Codex") : t("等待前置任务完成")}</button>}
                 {current.status === "in_progress" && !paused && ["waiting_quota", "failed"].includes(current.runState ?? "") && current.mergeState !== "blocked" && <button className="detail-open-thread-action" type="button" disabled={current.queued} onClick={() => void onAction(current, "retry")}><LinearIcon name="play" />{t("重试任务")}</button>}
                 {(current.status === "in_progress" || managed && current.status === "in_review") && !paused && !current.parentId && <button className="detail-copy-action" type="button" onClick={() => void onAction(current, managed ? "pause" : "interrupt_requeue")}><LinearIcon name="pause" />{managed ? t("暂停任务") : t("暂停并退回草稿")}</button>}
                 {paused && !current.parentId && current.status !== "canceled" && <button className="detail-open-thread-action" type="button" onClick={() => void onAction(current, "resume")}>{t("继续任务")}</button>}

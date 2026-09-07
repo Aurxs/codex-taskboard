@@ -12,6 +12,7 @@ from .constants import FAILED_RETRY_PROMPT
 from .task_skills import EXECUTE_SKILL, MERGE_SKILL, PLAN_SKILL
 from .errors import ConflictError, TaskboardError, UsageLimitExceeded, ValidationError
 from .parallel_db import rank
+from .questions import REPLY_OPEN
 
 
 ACTIVE = {"inProgress", "in_progress", "inprogress", "running", "pending"}
@@ -107,6 +108,11 @@ class ParallelRuntime:
         return thread
 
     async def execution_turn(self, task: dict, thread_id: str, prompt: str, options: dict) -> str:
+        question_reply = prompt.startswith(REPLY_OPEN)
+        if not question_reply:
+            prompt += self.db.plan_prompt(task["id"])
+            if task["parentId"]:
+                prompt += self.db.plan_prompt(task["parentId"])
         for previous_op in self.db.operations(task["id"], "execution"):
             if previous_op["state"] == "uncertain":
                 self.db.set_parallel(task["id"], uncertainExecution=previous_op["id"], nativeConflict=True,
@@ -117,7 +123,7 @@ class ParallelRuntime:
         self.db.save_operation(op_id, task["id"], "execution", "uncertain", threadId=thread_id,
                                previousTurnId=previous["turnId"] if previous else None)
         try:
-            turn = await self.server.start_turn(thread_id, prompt, task_id=task["id"], skill=EXECUTE_SKILL, **options)
+            turn = await self.server.start_turn(thread_id, prompt, task_id=task["id"], skill=None if question_reply else EXECUTE_SKILL, **options)
         except Exception as exc:
             from .app_server import RpcFailure
             definitive = isinstance(exc, (RpcFailure, UsageLimitExceeded, ValidationError))
@@ -630,7 +636,7 @@ class ParallelRuntime:
         from .app_server import extract_identifier
         thread = extract_identifier(params, "threadId")
         turn = extract_identifier(params, "turnId")
-        return next((o for o in self.db.operations() if o["kind"] in {"plan", "merge"}
+        return next((o for o in self.db.operations() if o["kind"] in {"plan", "merge", "task_plan"}
                      and ((thread and o["payload"].get("threadId") == thread) or (turn and o["payload"].get("turnId") == turn))), None)
 
     async def generate_plan(self, group: dict, request_id: str) -> dict:

@@ -142,6 +142,7 @@ class CodexAppServer:
         self._thread_tasks: dict[str, str] = {}
         self._server_request_tasks: set[asyncio.Task[None]] = set()
         self.last_stderr: str | None = None
+        self._thread_settings: dict[str, dict[str, Any]] = {}
 
     @property
     def running(self) -> bool:
@@ -188,7 +189,8 @@ class CodexAppServer:
                         "name": "codex-taskboard",
                         "title": "Codex Taskboard",
                         "version": "0.1.0",
-                    }
+                    },
+                    "capabilities": {"experimentalApi": True}
                 },
                 timeout=20,
             )
@@ -293,10 +295,13 @@ class CodexAppServer:
         thread_id = extract_identifier(response, "threadId", "id")
         if thread_id is None:
             raise AppServerError("Codex thread/start returned no thread id", details=response)
+        self._thread_settings[thread_id] = response
         return thread_id
 
     async def resume_thread(self, thread_id: str) -> Any:
-        return await self.request("thread/resume", {"threadId": thread_id}, timeout=30)
+        response = await self.request("thread/resume", {"threadId": thread_id}, timeout=30)
+        self._thread_settings[thread_id] = response
+        return response
 
     async def set_thread_name(self, thread_id: str, name: str) -> Any:
         # turn/start can return before the new rollout's metadata is flushed.
@@ -338,12 +343,26 @@ class CodexAppServer:
 
     async def start_turn(self, thread_id: str, prompt: str, *, task_id: str,
                          model: str | None = None, effort: str | None = None,
-                         skill: str | None = None) -> str:
+                         skill: str | None = None, plan: bool = False) -> str:
+        collaboration = {}
+        if plan:
+            settings = self._thread_settings.get(thread_id, {})
+            if not model and not settings.get("model"):
+                settings = await self.resume_thread(thread_id)
+            selected_model = model or settings.get("model")
+            if not selected_model:
+                raise AppServerError("Codex 未返回计划模式所需的当前模型")
+            collaboration = {"collaborationMode": {"mode": "plan", "settings": {
+                "model": selected_model,
+                "reasoning_effort": effort or settings.get("reasoningEffort"),
+                "developer_instructions": None,
+            }}}
         response = await self.request(
             "turn/start",
             {
                 "threadId": thread_id,
                 "input": turn_input(prompt, skill),
+                **collaboration,
                 **({"model": model} if model else {}),
                 **({"effort": effort} if effort else {}),
             },

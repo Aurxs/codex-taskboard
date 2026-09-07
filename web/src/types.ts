@@ -105,6 +105,7 @@ export interface CodexModel {
 }
 
 export interface Task extends ExecutionOptions {
+  plan?: { hold: boolean; operationId?: string | null; state?: string | null; threadId?: string; text?: string | null; acceptedText?: string | null; error?: string | null };
   parentId?: string | null;
   groupPhase?: "preparing" | "submitted" | "pausing" | "paused" | null;
   mergeState?: "none" | "pending_review" | "queued" | "merging" | "blocked" | "merged";

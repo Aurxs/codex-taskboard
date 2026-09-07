@@ -112,6 +112,7 @@ function normalizeTask(value: unknown): Task {
     projectId: String(item.projectId ?? ""),
     title: String(item.title ?? ""),
     description: String(item.description ?? ""),
+    plan: item.plan as Task["plan"],
     attachments: (item.attachments ?? []) as Task["attachments"],
     kind: item.kind === "parallel_group" ? "parallel_group" : "task",
     schedulingMode: item.schedulingMode === "parallel" ? "parallel" : "exclusive",
@@ -269,6 +270,7 @@ export async function replaceDependencies(id: string, version: number, blockedBy
 }
 
 export type TaskAction =
+  | "plan_start" | "plan_continue" | "plan_accept" | "plan_cancel"
   | "run"
   | "follow_up"
   | "interrupt_requeue"
@@ -294,7 +296,7 @@ export async function taskAction(
 export async function resolveInteraction(id: string, version: number, response: unknown): Promise<Interaction> {
   return await request<Interaction>(`/api/interactions/${encodeURIComponent(id)}/resolve`, {
     method: "POST",
-    body: JSON.stringify({ version, response }),
+    body: JSON.stringify({ version, response, canceled: !!response && typeof response === "object" && "decision" in response && response.decision === "cancel" }),
   });
 }
 

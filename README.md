@@ -196,13 +196,21 @@ python -m codex_taskboard.task_skills
 
 Installation updates only the files belonging to Taskboard-managed skills and refuses to overwrite an existing unowned skill with the same name. Keep personal skills under separate names; managed files are restored on the next deployment startup. Installation failures stop startup and are reported in the startup log. Sending tasks only references installed files; it does not install skills or change global Codex configuration.
 
-Every Taskboard turn explicitly references the relevant `$codex-taskboard-*` skill and its absolute path using the [App Server skill input](https://developers.openai.com/codex/app-server). Skills are included in both Python packages and the desktop sidecar.
+Execution, decomposition, and merge turns explicitly reference the relevant `$codex-taskboard-*` skill and its absolute path using the [App Server skill input](https://developers.openai.com/codex/app-server). Skills are included in both Python packages and the desktop sidecar.
 
 ## Architecture
 
 `src/codex_taskboard` handles SQLite, FastAPI, SSE, scheduling, and the Codex protocol client. `web` is the React/Vite board that provides full functionality only when embedded in Codex. `injector` provides the CDP controller, passive native-message reader, and board host bridge. `src-tauri` is a windowless launcher that manages the Python sidecar lifecycle; the board is always shown inside Codex.
 
-All public APIs are served on local loopback. State writes use optimistic locking through version fields. `Interaction` and `blocking_scope` are reserved for future asynchronous interactions, but v1 does not enable Astra-specific scheduling or add model branches.
+All public APIs are served on local loopback. State writes use optimistic locking through version fields. Blocking questions use `item/tool/requestUserInput`. Astra questions arrive as `agentMessage.delivery=async`, keep the current turn running, and receive structured follow-up messages with native question IDs. Answers are reconciled between Codex and Taskboard.
+
+## Task Plan
+
+After creating a regular task, click **Plan · Create detailed plan** below its detail editor (drafts are supported). Taskboard starts a separate conversation in native Plan mode with the task's model and reasoning effort, preserving Codex safety settings. The task stays in Todo; both automatic and manual execution wait until planning is confirmed or canceled.
+
+Question cards support options, descriptions, and free text. Answer successive questions or send additional requirements. The complete final plan is persisted in SQLite `task_operations`, without truncation to an execution summary. Confirmation includes it in subsequent execution, follow-up, and retry turns. Unconfirmed revisions preserve the previously accepted plan; cancellation restores normal scheduling. If task requirements change, send an update to synchronize the plan before confirming.
+
+Planning and execution use separate conversations. Recovery reads the original planning conversation and never blindly retries an uncertain turn start. This uses the local app-server's experimental `collaborationMode` protocol and requires a Codex version supporting native Plan mode. Task-group JSON decomposition proposals keep their existing separate entry point.
 
 ## Sources and license
 

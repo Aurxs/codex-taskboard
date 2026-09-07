@@ -63,11 +63,26 @@ class ParallelDatabase:
             "targetBranch": row["target_branch"], "parallel": state,
             "groupPhase": state.get("groupPhase"), "mergeState": state.get("mergeState", "none"),
             "waitReason": state.get("waitReason"), "queued": bool(queued),
+            "plan": self.task_plan(row["id"], state),
             "progress": {"total": len(children),
                          "integrated": sum(json.loads(c["parallel_state"]).get("mergeState") == "merged" and c["status"] == "done" for c in children),
                          "running": sum(c["run_state"] in {"starting", "running", "waiting_input", "waiting_approval"} for c in children),
                          "attention": sum(c["run_state"] == "failed" or c["status"] == "canceled" or json.loads(c["parallel_state"]).get("needsValidation", False) for c in children)},
         }
+
+    def task_plan(self, task_id: str, state: dict) -> dict:
+        operation = self.operation(state.get("planOperation", ""))
+        accepted = self.operation(state.get("acceptedPlan", ""))
+        return {"hold": bool(state.get("planHold")),
+                "operationId": operation["id"] if operation else None,
+                "state": operation["state"] if operation else None,
+                **(operation["payload"] if operation else {}),
+                "acceptedText": accepted["payload"].get("text") if accepted else None}
+
+    def plan_prompt(self, task_id: str) -> str:
+        task = self.get_task(task_id)
+        text = task["plan"].get("acceptedText")
+        return "\nSaved implementation plan:\n" + text + "\n" if text else ""
 
     def children(self, parent_id: str) -> list[dict]:
         with self._lock:
@@ -164,6 +179,8 @@ class ParallelDatabase:
                 raise ConflictError("Task changed; refresh before running it")
             if previous and previous["state"] in {"pending", "claimed"}:
                 raise ConflictError("任务已经排队或正在启动")
+            if task["parallel"].get("planHold"):
+                raise ValidationError("请先确认或取消任务计划")
             if task["priority"] == "draft":
                 raise ValidationError("请先将草稿改为其他优先级，再执行任务")
             if task["kind"] == "parallel_group":
@@ -216,6 +233,8 @@ class ParallelDatabase:
         return None
 
     def eligibility(self, task: dict, *, fairness=True) -> str | None:
+        if task["parallel"].get("planHold"):
+            return "请先确认或取消任务计划"
         if not self.dependencies_ready(task["id"]):
             return "等待前置任务完成并合入"
         if task["parallel"].get("paused") or task["parallel"].get("nativeConflict"):
@@ -253,7 +272,7 @@ class ParallelDatabase:
                     continue
                 pending = earlier["queued"] or (earlier["status"] == "todo" and (earlier["parallel"].get("runRequested") or self.get_project(earlier["projectId"])["automationEnabled"]))
                 if (pending and earlier["schedulingMode"] == "exclusive" and earlier["priority"] != "draft"
-                    and not earlier["parallel"].get("paused") and self.dependencies_ready(earlier["id"])
+                    and not earlier["parallel"].get("paused") and not earlier["parallel"].get("planHold") and self.dependencies_ready(earlier["id"])
                     and (earlier["kind"] != "parallel_group" or earlier["groupPhase"] == "submitted")
                     and self.repo_info(earlier)[1] == key):
                     return f"等待前序独占任务 {earlier['identifier']}"

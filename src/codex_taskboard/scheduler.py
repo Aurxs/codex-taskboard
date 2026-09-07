@@ -31,6 +31,8 @@ from .errors import (
 )
 from .events import EventBus
 from .parallel_runtime import ParallelRuntime
+from .planning import TaskPlanning
+from .questions import REPLY_OPEN, record_questions, reply_summary, reply_text, validate_answers
 
 
 def _values(value: Any):
@@ -214,6 +216,8 @@ class Scheduler:
         self._history_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._last_sync = 0.0
         self.parallel = ParallelRuntime(self)
+        self.planning = TaskPlanning(self)
+        self._answer_lock = asyncio.Lock()
 
     @property
     def running(self) -> bool:
@@ -277,6 +281,10 @@ class Scheduler:
         if int(task["version"]) != expected_version:
             raise ConflictError("Task changed; refresh before applying the action")
 
+        if action.startswith("plan_"):
+            return await self.planning.action(task, action, feedback)
+        if task["plan"]["hold"]:
+            raise ValidationError("请先确认或取消任务计划")
         handled = await self.parallel.action(task, action, feedback)
         if handled is not None:
             return handled
@@ -395,7 +403,8 @@ class Scheduler:
             if not turns:
                 active = self._task_turns.get(task_id)
             if active:
-                await self.server.steer_turn(task["threadId"], active, text.strip(), skill=EXECUTE_SKILL)
+                await self.server.steer_turn(task["threadId"], active, text.strip(),
+                                             skill=None if text.strip().startswith(REPLY_OPEN) else EXECUTE_SKILL)
                 return self.db.get_task(task_id)
             if task_id in self._execution_tasks and not self._execution_tasks[task_id].done():
                 raise ConflictError("Codex 正在启动或结束回合，请稍后发送")
@@ -440,6 +449,8 @@ class Scheduler:
         canceled: bool = False,
     ) -> dict[str, Any]:
         interaction = self.db.get_interaction(interaction_id)
+        if interaction["kind"] == "async_user_input":
+            return await self._resolve_async_question(interaction_id, expected_version, response, canceled=canceled)
         response = self._validate_interaction_response(interaction, response, canceled=canceled)
         if isinstance(self.server, DesktopAppServer):
             if interaction["status"] != "pending" or interaction["version"] != expected_version:
@@ -462,7 +473,7 @@ class Scheduler:
         if waiter is not None and not waiter.done():
             waiter.set_result(response)
         task = self.db.get_task(interaction["taskId"])
-        if task["status"] == TaskStatus.IN_PROGRESS.value and task["runState"] in {
+        if not self.db.list_interactions(task["id"], pending_only=True) and task["status"] == TaskStatus.IN_PROGRESS.value and task["runState"] in {
             RunState.WAITING_APPROVAL.value,
             RunState.WAITING_INPUT.value,
         }:
@@ -472,6 +483,33 @@ class Scheduler:
         await self._publish_interaction(resolved)
         self.kick()
         return resolved
+
+    async def _resolve_async_question(self, interaction_id, version, response, *, canceled=False):
+        async with self._answer_lock:
+            interaction = self.db.get_interaction(interaction_id)
+            if interaction["status"] != "pending" or interaction["version"] != version:
+                raise ConflictError("该问题已回答，请刷新")
+            if not canceled:
+                response = validate_answers(interaction, response)
+                text = reply_text(interaction, response)
+                op = self.parallel.auxiliary(interaction["payload"])
+                if op and op["kind"] == "task_plan":
+                    async with self.planning.lock:
+                        op = self.db.operation(op["id"])
+                        if op["state"] in {"confirmed", "canceled", "uncertain", "starting", "pending"}:
+                            raise ConflictError("计划已结束或状态待核对，请刷新")
+                        await self.planning.send(op, text)
+                else:
+                    task = self.db.get_task(interaction["taskId"])
+                    if interaction["payload"].get("threadId") != task["threadId"]:
+                        raise ValidationError("请在 Codex 中回答此辅助会话的问题")
+                    await self.follow_up(task["id"], task["version"], text)
+            latest = self.db.get_interaction(interaction_id)
+            if latest["status"] != "pending":
+                return latest
+            resolved = self.db.resolve_interaction(interaction_id, version, response, canceled=canceled)
+            await self._publish_interaction(resolved)
+            return resolved
 
     async def _loop(self) -> None:
         if not self._recovered:
@@ -483,6 +521,7 @@ class Scheduler:
                 self._last_sync = time.monotonic()
                 await self._sync_threads()
                 await self.parallel.recover()
+                await self.planning.recover()
             await self._resume_quota_tasks()
             await self._dispatch_automated()
             timeout = self._next_wait_timeout()
@@ -544,6 +583,8 @@ class Scheduler:
             # reconcile runs below; never resume, fail or cancel native turns
             # just because the renderer has not attached yet.
             for interaction in self.db.pending_interactions():
+                if interaction["kind"] == "async_user_input":
+                    continue
                 self.db.resolve_interaction(interaction["id"], interaction["version"],
                                             {"reconnectInCodex": True}, canceled=True)
             return
@@ -605,6 +646,8 @@ class Scheduler:
         # A pending interaction cannot safely be answered after a process
         # restart because its JSON-RPC request id belongs to the old process.
         for interaction in self.db.pending_interactions():
+            if interaction["kind"] == "async_user_input":
+                continue
             try:
                 self.db.resolve_interaction(
                     interaction["id"], interaction["version"], {"decision": "cancel"}, canceled=True
@@ -622,16 +665,22 @@ class Scheduler:
                 await self.server.start()
 
     def _record_item(self, task_id: str, turn_id: str, item: dict[str, Any],
-                     completed: bool, created_at: str | None = None) -> None:
+                     completed: bool, created_at: str | None = None, *, thread_id: str | None = None) -> None:
         kind = item.get("type", "")
         if kind == "reasoning" or not item.get("id"):
             return
+        thread_id = thread_id or self.db.get_task(task_id)["threadId"]
+        if thread_id and (completed or item.get("delivery") == "async"):
+            record_questions(self.db, task_id, thread_id, turn_id, item)
         message = item.get("text") or item.get("command") or item.get("tool") or item.get("query") or kind
-        if kind == "userMessage":
+        if kind in {"userMessage", "steeringUserMessage"}:
             message = "\n".join(part.get("text", "") for part in item.get("content", []) if isinstance(part, dict) and part.get("type") == "text") or item.get("text") or "用户消息"
+            message = reply_summary(message)
+        if kind == "agentMessage" and item.get("delivery") == "async":
+            message = "\n".join(q.get("title", "") for q in item.get("questions") or []) or item.get("text", "")
         self.db.save_activity(task_id, {
             "id": f"{turn_id}:{item['id']}", "kind": kind,
-            "message": str(message) if kind != "agentMessage" or item.get("text") else "正在回复…",
+            "message": str(message) if kind != "agentMessage" or item.get("text") or item.get("delivery") == "async" else "正在回复…",
             "status": "completed" if completed else "running", "data": item,
             **({"createdAt": created_at} if created_at else {}),
         })
@@ -829,15 +878,17 @@ class Scheduler:
                 )
             else:
                 prompt = continuation_prompt
+            question_reply = prompt.startswith(REPLY_OPEN)
             if task["parentId"]:
                 parent = self.db.get_task(task["parentId"])
-                prompt = (f"Parent task: {parent['title']}\nOverall requirements:\n{parent['description']}\n\n" + prompt)
-                prompt += self.db.attachment_prompt(parent["id"])
+                if not question_reply:
+                    prompt = (f"Parent task: {parent['title']}\nOverall requirements:\n{parent['description']}\n\n" + prompt)
+                    prompt += self.db.attachment_prompt(parent["id"])
                 task = {**task, "model": task["model"] or parent["model"],
                         "reasoningEffort": task["reasoningEffort"] or (parent["reasoningEffort"] if not task["model"] else None)}
-            if task["writeScopes"]:
+            if task["writeScopes"] and not question_reply:
                 prompt += "\nDeclared modification scope:\n" + "\n".join(task["writeScopes"])
-            if task["parallel"].get("validationBase"):
+            if task["parallel"].get("validationBase") and not question_reply:
                 prompt += f"\nDependency integration revision: {task['parallel']['validationBase']}"
             if continuation_prompt is None:
                 prompt += self.db.attachment_prompt(task_id)
@@ -1173,7 +1224,7 @@ class Scheduler:
                     if updated:
                         await self._publish_task(updated)
             if method in {"item/started", "item/completed"}:
-                self._record_item(task_id, turn_id or "", params.get("item", {}), method == "item/completed")
+                self._record_item(task_id, turn_id or "", params.get("item", {}), method == "item/completed", thread_id=_identifier(params, "threadId"))
             await self.events.publish(
                 "run.event",
                 project_id=project_id,
@@ -1251,17 +1302,12 @@ class Scheduler:
             elif not _permission_subset(requested, granted):
                 raise ValidationError("Permission response exceeds the requested permissions")
             return {"permissions": granted, "scope": scope}
+        if kind == "async_user_input":
+            return validate_answers(interaction, response)
         if kind == "user_input":
             if not isinstance(response, dict) or not isinstance(response.get("answers"), dict):
                 raise ValidationError("User input response must contain answers")
-            question_ids = {
-                str(item.get("id") or item.get("questionId"))
-                for item in _values(interaction["payload"])
-                if item.get("id") is not None or item.get("questionId") is not None
-            }
-            if question_ids and any(str(key) not in question_ids for key in response["answers"]):
-                raise ValidationError("User input response contains an unknown question id")
-            return response
+            return validate_answers(interaction, response)
         raise ValidationError(f"Unsupported interaction kind {kind!r}")
 
     async def _handle_server_request(

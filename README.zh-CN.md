@@ -194,13 +194,21 @@ python -m codex_taskboard.task_skills
 
 安装仅更新 Taskboard 管理的 skill 文件；遇到已有同名但非 Taskboard 管理的目录会报错，避免覆盖用户自己的 skill。个人定制请使用其他名称，受管理文件会在下次部署启动时恢复。安装失败会阻止启动并记录错误。任务发送阶段只引用已安装文件，不安装 skill，也不修改 Codex 全局配置。
 
-每条 Taskboard 回合通过 [App Server skill input](https://developers.openai.com/codex/app-server) 显式引用对应的 `$codex-taskboard-*` 名称和绝对路径。Python 包与桌面 sidecar 都包含这些 skill 资源。
+执行、拆分和合并回合通过 [App Server skill input](https://developers.openai.com/codex/app-server) 显式引用对应的 `$codex-taskboard-*` 名称和绝对路径。Python 包与桌面 sidecar 都包含这些 skill 资源。
 
 ## 架构
 
 `src/codex_taskboard` 负责 SQLite schema/migrations、FastAPI API、SSE、调度器和 Codex 会话协议客户端。`web` 是只在 Codex 内嵌态提供完整功能的 React/Vite 看板。`injector` 提供 Python CDP 控制器、被动原生消息读取和看板宿主桥。`src-tauri` 是无窗口启动器，只管理 Python sidecar 生命周期；看板始终显示在 Codex 内部。
 
-所有公开 API 都在本地 loopback 上提供；状态写入使用版本字段进行乐观锁检查。`Interaction` 与 `blocking_scope` 为未来异步交互保留接口，但 v1 不启用 Astra 专属调度，不增加模型分支。
+所有公开 API 都在本地 loopback 上提供；状态写入使用版本字段进行乐观锁检查。阻塞问题通过 `item/tool/requestUserInput` 回答；Astra 的 `agentMessage.delivery=async` 问题不暂停当前回合，使用原生问题标识和结构化跟进消息回答，支持原生会话与看板之间的回答同步。
+
+## 任务 Plan
+
+创建普通任务后，在详情编辑区下方点击 **Plan · 生成详细计划**（草稿也可使用）。Taskboard 创建独立会话，选择原生 Plan 模式并沿用任务模型、推理强度及 Codex 的安全配置。任务在规划期间保持待认领，自动和手动执行都会等待计划处理完毕。
+
+问题卡片支持选项、说明和自由输入。可以多轮回答，也可以发送补充要求。完整最终计划保存在 SQLite 的 `task_operations` 中，不截断为执行摘要；确认后自动附加到该任务后续执行、跟进和重试的新回合。未确认的新方案不会覆盖已有执行计划；取消规划后恢复原有调度规则。任务要求有修改时，需要发送补充让计划同步后再确认。
+
+计划会话与执行会话分开，重启后通过原会话恢复记录；不确定的回合启动不会自动重复发送。此功能使用本机 Codex app-server 的实验性 `collaborationMode` 协议，需要支持原生 Plan 模式的 Codex 版本。任务组的 JSON 拆分草案仍使用原来的独立入口。
 
 ## 来源与许可
 
