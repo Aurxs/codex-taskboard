@@ -57,6 +57,7 @@ try {
   const box = await composer.boundingBox();
   const form = ui.locator('.task-followup');
   assert.ok((await form.boundingBox()).height <= 96, 'composer uses a compact height');
+  assert.equal(await form.evaluate(el => getComputedStyle(el).margin), '0px', 'composer has no extra outer whitespace');
   assert.notEqual(await form.evaluate(el => getComputedStyle(el).boxShadow), 'none', 'composer has a subtle surrounding shadow');
   assert.equal(await form.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)', 'composer uses the white raised surface');
   assert.equal(await composer.evaluate(el => getComputedStyle(el).resize), 'none', 'no resize handle');
