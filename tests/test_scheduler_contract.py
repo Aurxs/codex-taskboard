@@ -180,6 +180,22 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.get_task(task["id"])["status"], "in_progress")
         self.assertEqual(self.scheduler._task_turns[task["id"]], "followup-turn")
 
+    async def test_followup_includes_readable_attachments_for_active_and_completed_turns(self):
+        task = self.running_task(self.project(review_required=False))
+        task = self.db.update_task(task["id"], task["version"], attachments=[
+            {"name": "context.txt", "content": "Y29udGV4dA=="}])
+        prompt = "查看附件" + self.db.attachment_prompt(task["id"])
+        self.scheduler._register_turn(task["id"], "turn-1")
+        self.server.steer_turn = AsyncMock(return_value={"turnId": "turn-1"})
+        await self.scheduler.action(task["id"], "follow_up", task["version"], "查看附件")
+        self.server.steer_turn.assert_awaited_once_with("thread-1", "turn-1", prompt, skill=EXECUTE_SKILL)
+        await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
+        task = self.db.get_task(task["id"])
+        self.server.start_turn = AsyncMock(return_value="attachment-turn")
+        with patch.object(self.scheduler, "_spawn_existing_watch"):
+            await self.scheduler.action(task["id"], "follow_up", task["version"], "查看附件")
+        self.server.start_turn.assert_awaited_once_with("thread-1", prompt, task_id=task["id"], skill=EXECUTE_SKILL)
+
     async def test_failed_followup_does_not_change_completed_task(self):
         task = self.running_task(self.project(review_required=False))
         await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})

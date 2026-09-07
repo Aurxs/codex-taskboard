@@ -242,6 +242,7 @@ export const en = {
   "仅支持图片、Markdown、文本、PDF 和 Office 文档。": "Only images, Markdown, text, PDF, and Office documents are supported.",
   "无法读取 {0}": "Cannot read {0}",
   "添加图片、Markdown、PDF 或 Office 文档；也可在内容区域直接粘贴": "Attach images, Markdown, PDF, or Office documents, or paste into the content area",
+  "请查看附件。": "Please review the attachments.",
   "添加附件": "Add attachments",
   "附件读取失败": "Failed to read attachment",
   "附件打开失败": "Failed to open attachment",

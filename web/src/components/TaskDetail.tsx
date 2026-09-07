@@ -117,6 +117,8 @@ export function TaskDetail({
   const [propertyOpen, setPropertyOpen] = useState(false);
   const [followup, setFollowup] = useState("");
   const [sending, setSending] = useState(false);
+  const [followupAttachmentIds, setFollowupAttachmentIds] = useState<string[]>([]);
+  const followupAttachments = (current.attachments ?? []).filter(file => followupAttachmentIds.includes(file.id));
   const [threadInput, setThreadInput] = useState("");
   const [parentTask, setParentTask] = useState<Task | null>(null);
   useEffect(() => { let active = true; if (task.parentId) void getTask(task.parentId).then(parent => { if (active) setParentTask(parent); }).catch(() => {}); else setParentTask(null); return () => { active = false; }; }, [task.parentId, task.version]);
@@ -129,15 +131,16 @@ export function TaskDetail({
   async function refreshCurrent() { setCurrent(await getTask(current.id)); }
   const sendingRef = useRef(false);
   async function sendFollowup() {
-    if (!followup.trim() || sendingRef.current) return;
+    if ((!followup.trim() && !followupAttachments.length) || sendingRef.current || uploading.current || saving) return;
     sendingRef.current = true;
     setSending(true);
     const text = followup;
     try {
-      const next = await onAction(current, "follow_up", text.trim());
+      const next = await onAction(current, "follow_up", text.trim() || t("请查看附件。"));
       if (next) {
         setCurrent(previous => next.version >= previous.version ? next : previous);
         setFollowup(value => value === text ? "" : value);
+        setFollowupAttachmentIds([]);
       }
     } finally { sendingRef.current = false; setSending(false); }
   }
@@ -148,8 +151,8 @@ export function TaskDetail({
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [addingAttachments, setAddingAttachments] = useState(false);
   const [removingAttachmentId, setRemovingAttachmentId] = useState<string | null>(null);
-  async function addFiles(files: File[]) {
-    if (!files.length || uploading.current || saving) return;
+  async function addFiles(files: File[], forFollowup = false) {
+    if (!files.length || uploading.current || saving || sendingRef.current) return;
     uploading.current = true;
     setAddingAttachments(true);
     setAttachmentError(null);
@@ -157,7 +160,10 @@ export function TaskDetail({
       validateAttachments(current.attachments ?? [], files);
       const attachments = await readAttachments(files);
       const next = await onUpdate(current, { attachments });
-      if (next) setCurrent(previous => next.version >= previous.version ? next : previous);
+      if (next) {
+        setCurrent(previous => next.version >= previous.version ? next : previous);
+        if (forFollowup) setFollowupAttachmentIds(ids => [...ids, ...(next.attachments ?? []).filter(file => !(current.attachments ?? []).some(existing => existing.id === file.id)).map(file => file.id)]);
+      }
       else setAttachmentError(t("附件未保存，请重新添加。"));
     } catch (cause) { setAttachmentError(cause instanceof Error ? cause.message : t("附件添加失败。")); }
     finally { uploading.current = false; setAddingAttachments(false); }
@@ -258,9 +264,12 @@ export function TaskDetail({
               {pendingInteractions.length > 0 && <div className="interaction-list">{pendingInteractions.filter(i => !current.plan?.hold || i.payload?.threadId !== current.plan?.threadId).map((interaction) => <InteractionRow key={interaction.id} interaction={interaction} onResolve={onResolveInteraction} />)}</div>}
             </section>
             </div>
-            {!isGroup && current.threadId && ["in_progress", "in_review", "done"].includes(current.status) && <form className="task-followup" onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
+            {!isGroup && current.threadId && ["in_progress", "in_review", "done"].includes(current.status) && <form className="task-followup" onPaste={event => { void addFiles(pastedFiles(event), true); }} onSubmit={event => { event.preventDefault(); void sendFollowup(); }}>
+              {followupAttachments.length > 0 && <ul className="attachment-card-list task-followup-attachments">{followupAttachments.map(file => <AttachmentCard key={file.id} file={file} disabled={sending || saving || addingAttachments || removingAttachmentId !== null} onPreview={() => setPreviewFile(file)} onRemove={() => void removeFile(file.id)} />)}</ul>}
               <textarea aria-label={t("跟进 Codex 会话")} placeholder={t("向 Codex 补充细节或继续处理…")} title={t("Enter 发送 · Shift+Enter 换行")} rows={2} value={followup} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void sendFollowup(); } }} />
-              <div className="task-followup-footer"><button type="submit" aria-label={t("发送跟进消息")} title={sending ? t("正在发送…") : t("发送跟进消息")} aria-busy={sending} disabled={sending || !followup.trim()}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg></button></div>
+              <div className="task-followup-footer"><AttachmentButton iconOnly count={followupAttachments.length} disabled={sending || saving || addingAttachments || removingAttachmentId !== null} onAdd={files => void addFiles(files, true)} /><button className="task-followup-send" type="submit" aria-label={t("发送跟进消息")} title={sending ? t("正在发送…") : t("发送跟进消息")} aria-busy={sending} disabled={sending || saving || addingAttachments || removingAttachmentId !== null || (!followup.trim() && !followupAttachments.length)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg></button></div>
+              {addingAttachments && <p className="task-followup-status" role="status">{t("正在添加附件…")}</p>}
+              {attachmentError && <p className="form-error" role="alert">{localizeError(attachmentError)}</p>}
             </form>}
           </div>
           <aside className="issue-properties">
