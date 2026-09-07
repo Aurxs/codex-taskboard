@@ -182,7 +182,21 @@ python3 scripts/check_sidecar_smoke.py --required
 - Desktop data is stored by default in `~/Library/Application Support/Codex Taskboard/`; source development uses `.data/` in the repository.
 - The local database, logs, browser profiles, and build artifacts are not uploaded to this repository.
 - Tasks are executed by the Codex App Server. “Local-first” means the board service and data are stored on the local machine; it does not mean the model runs offline.
-- Taskboard does not install a Taskboard Skill, use Scheduled Tasks, or override Codex system/developer instructions, sandbox, or approval settings.
+- Deployment installs three explicit-only Taskboard skills in the user’s global Codex skills directory. Taskboard messages invoke the relevant skill; ordinary Codex conversations do not load these rules automatically. Taskboard does not use Scheduled Tasks or override system/developer instructions, sandbox, or approval settings.
+
+## Taskboard skills
+
+Taskboard keeps its workflow instructions in three short skills: `codex-taskboard-execute` (task execution, follow-ups and retries), `codex-taskboard-plan` (JSON decomposition proposals), and `codex-taskboard-merge` (integration conflicts). Each has `policy.allow_implicit_invocation: false`.
+
+Desktop deployment installs/updates them on first launch and after upgrades, before connecting to Codex. `scripts/dev.py` and the `codex-taskboard` entry point also perform this idempotent setup. Files live in `$CODEX_HOME/skills`, or `~/.codex/skills` by default. For a direct Uvicorn deployment, install them first:
+
+```bash
+python -m codex_taskboard.task_skills
+```
+
+Installation updates only the files belonging to Taskboard-managed skills and refuses to overwrite an existing unowned skill with the same name. Keep personal skills under separate names; managed files are restored on the next deployment startup. Installation failures stop startup and are reported in the startup log. Sending tasks only references installed files; it does not install skills or change global Codex configuration.
+
+Every Taskboard turn explicitly references the relevant `$codex-taskboard-*` skill and its absolute path using the [App Server skill input](https://developers.openai.com/codex/app-server). Skills are included in both Python packages and the desktop sidecar.
 
 ## Architecture
 

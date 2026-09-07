@@ -180,7 +180,21 @@ python3 scripts/check_sidecar_smoke.py --required
 - 桌面版数据默认位于 `~/Library/Application Support/Codex Taskboard/`；源码开发模式使用仓库内 `.data/`。
 - 本地数据库、日志、浏览器 profile 和构建产物不上传到本仓库。
 - 任务由 Codex App Server 执行；「本地优先」指看板服务和数据存储在本机，并不意味着模型离线运行。
-- 不安装 Taskboard Skill、不使用 Scheduled Tasks，不覆盖 Codex 的 system/developer 指令、沙箱或审批设置。
+- 部署时将三个仅显式调用的 Taskboard skills 安装到用户的 Codex 全局 skills 目录，由 Taskboard 消息显式引用；用户自行发起的普通 Codex 对话不会自动加载这些规则。不使用 Scheduled Tasks，不覆盖 system/developer 指令、沙箱或审批设置。
+
+## Taskboard skills
+
+执行规则收纳为三个简短 skill：`codex-taskboard-execute`（执行、跟进和重试）、`codex-taskboard-plan`（JSON 拆分草案）、`codex-taskboard-merge`（集成冲突处理）。每个 skill 都设置 `policy.allow_implicit_invocation: false`，仅在显式引用时使用。
+
+桌面版在首次启动及升级后的部署初始化中、连接 Codex 前安装或更新；`scripts/dev.py` 和 `codex-taskboard` 启动入口也会执行幂等安装。目录为 `$CODEX_HOME/skills`，未设置时使用 `~/.codex/skills`。直接使用 Uvicorn 部署时，先运行：
+
+```bash
+python -m codex_taskboard.task_skills
+```
+
+安装仅更新 Taskboard 管理的 skill 文件；遇到已有同名但非 Taskboard 管理的目录会报错，避免覆盖用户自己的 skill。个人定制请使用其他名称，受管理文件会在下次部署启动时恢复。安装失败会阻止启动并记录错误。任务发送阶段只引用已安装文件，不安装 skill，也不修改 Codex 全局配置。
+
+每条 Taskboard 回合通过 [App Server skill input](https://developers.openai.com/codex/app-server) 显式引用对应的 `$codex-taskboard-*` 名称和绝对路径。Python 包与桌面 sidecar 都包含这些 skill 资源。
 
 ## 架构
 

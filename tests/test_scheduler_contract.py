@@ -12,6 +12,7 @@ from codex_taskboard.constants import (
     RunState,
     TaskStatus,
 )
+from codex_taskboard.task_skills import BUNDLED_SKILLS_ROOT, EXECUTE_SKILL
 from codex_taskboard.db import Database
 from codex_taskboard.desktop_server import DesktopAppServer
 from codex_taskboard.errors import AppServerError, ConflictError, ValidationError
@@ -71,7 +72,8 @@ class FakeAppServer:
     async def read_thread(self, thread_id: str, *, include_turns: bool = True):
         return self.read_snapshots.get(thread_id, {})
 
-    async def start_turn(self, thread_id: str, prompt: str, *, task_id: str):
+    async def start_turn(self, thread_id: str, prompt: str, *, task_id: str, skill=None):
+        assert skill == EXECUTE_SKILL
         self._turn_number += 1
         turn_id = f"turn-{self._turn_number}"
         self.turn_calls.append((thread_id, prompt, task_id))
@@ -164,7 +166,7 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
         self.scheduler._register_turn(task["id"], "turn-1")
         self.server.steer_turn = AsyncMock(return_value={"turnId": "turn-1"})
         await self.scheduler.action(task["id"], "follow_up", task["version"], "补充")
-        self.server.steer_turn.assert_awaited_once_with("thread-1", "turn-1", "补充")
+        self.server.steer_turn.assert_awaited_once_with("thread-1", "turn-1", "补充", skill=EXECUTE_SKILL)
         self.assertEqual(self.server.turn_calls, [])
         await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
         task = self.db.get_task(task["id"])
@@ -173,7 +175,7 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
             continued = await self.scheduler.action(task["id"], "follow_up", task["version"], "再优化")
             watch.assert_called_once_with(task["id"], "followup-turn")
         self.assertEqual(continued["status"], "in_progress")
-        self.server.start_turn.assert_awaited_once_with("thread-1", "再优化", task_id=task["id"])
+        self.server.start_turn.assert_awaited_once_with("thread-1", "再优化", task_id=task["id"], skill=EXECUTE_SKILL)
         await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
         self.assertEqual(self.db.get_task(task["id"])["status"], "in_progress")
         self.assertEqual(self.scheduler._task_turns[task["id"]], "followup-turn")
@@ -212,7 +214,7 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
                 task = self.db.update_task(task["id"], task["version"], thread_id=existing_thread)
             await self.scheduler._execute_task(task["id"], None)
             self.assertEqual(self.server.start_turn.call_args.kwargs, {
-                "task_id": task["id"], "model": "test-model", "effort": "high",
+                "task_id": task["id"], "model": "test-model", "effort": "high", "skill": EXECUTE_SKILL,
             })
             self.assertEqual(self.db.get_task(task["id"])["status"], "in_review")
 
@@ -440,7 +442,7 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
                 initial["id"],
             ),
         )
-        self.assertIn("you must commit the changes produced by this task.", self.server.turn_calls[0][1])
+        self.assertIn("commit the changes produced by this task.", (BUNDLED_SKILLS_ROOT / EXECUTE_SKILL / "SKILL.md").read_text())
 
         failed = self.running_task(project, title="failed retry", thread_id="thread-retry", state=RunState.FAILED.value)
         spawn = Mock()

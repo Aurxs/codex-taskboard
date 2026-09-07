@@ -21,6 +21,7 @@ from urllib.error import URLError
 from urllib.request import ProxyHandler, build_opener
 
 from codex_taskboard.platforms import configure_standard_streams, user_data_directory
+from codex_taskboard.task_skills import install_skills
 
 from injector.cdp_injector import (
     CdpInjector,
@@ -245,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(signal, "SIGUSR1"):
         signal.signal(signal.SIGUSR1, request_open)
     try:
+        # First launch/upgrade deployment setup, before connecting to Codex.
+        install_skills()
         if args.control_file is not None:
             control_path = args.control_file.expanduser().resolve()
             control_path.parent.mkdir(parents=True, exist_ok=True)
@@ -273,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         if pending_open.is_set():
             injector.request_open()
         return injector.run()
-    except (InjectorError, RuntimeError) as exc:
+    except (InjectorError, RuntimeError, OSError) as exc:
         _emit("error", phase="sidecar", message=str(exc))
         print(f"Codex Taskboard sidecar: {exc}", file=sys.stderr)
         return 1

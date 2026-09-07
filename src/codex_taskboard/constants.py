@@ -1,9 +1,4 @@
-"""Shared state and prompt constants.
-
-The prompt strings in this module are deliberately the only text the
-orchestrator adds to a Codex turn.  In particular, no system/developer
-instructions or per-turn configuration is supplied by Taskboard.
-"""
+"""Shared state and task context templates; workflow instructions live in skills."""
 
 from enum import StrEnum
 
@@ -43,34 +38,20 @@ PRIORITY_RANK = {
     Priority.DRAFT.value: 5,
 }
 
-# Keep orchestration text in English and explicitly preserve the task author's
-# language, so the wrapper does not force Chinese replies for English tasks.
+# Keep task context separate from the explicitly invoked workflow skill.
 INITIAL_TURN_TEMPLATE = (
     'You are working on task "{identifier}: {title}".\n\n'
     "{description}\n\n"
-    "Complete this task in the current project directory, following all project instructions "
-    "and safety settings already loaded by Codex. Continue until the task is complete and "
-    "perform verification proportionate to the changes. Before completing the task, "
-    "you must commit the changes produced by this task. "
-    "In your final response, describe what was completed, verification results, and any "
-    "unfinished work or questions requiring a human decision. Use the language of the task "
-    "title and description unless the user requests otherwise. "
-    "Do not operate Taskboard; the scheduler manages task status."
 )
 
 QUOTA_RESUME_PROMPT = (
-    "Execution was interrupted by usage limits. Continue from this thread's existing "
-    "context and complete the remaining work and verification. Keep using the user's language."
+    "Execution was interrupted by usage limits. Continue the remaining work."
 )
 
-FAILED_RETRY_PROMPT = (
-    "Continue from this thread's existing context, retry the unfinished work, complete "
-    "the task, and verify the changes proportionately. Keep using the user's language."
-)
+FAILED_RETRY_PROMPT = "Retry the unfinished work in this thread."
 
 REVIEW_FEEDBACK_TEMPLATE = (
-    "Changes were requested during review. User feedback:\n{feedback}\n"
-    "Continue editing and verifying. Keep using the user's language."
+    "Changes were requested during review. User feedback:\n{feedback}"
 )
 
 APPROVAL_METHODS = {

@@ -2,7 +2,8 @@
 
 The client intentionally sends only the parameters needed to select a
 workspace and a turn. Model and effort are sent only when explicitly selected
-for a task. It does not add an approval policy,
+for a task. Taskboard turns can explicitly select a globally installed skill.
+It does not add an approval policy,
 sandbox, personality, goal, or hidden context, so the user's existing Codex
 configuration remains authoritative.
 """
@@ -18,6 +19,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .task_skills import turn_input
 from .errors import AppServerError, UsageLimitExceeded
 from .platforms import desktop, split_command, executable_command, hidden_process_options
 
@@ -335,12 +337,13 @@ class CodexAppServer:
             seen.add(cursor)
 
     async def start_turn(self, thread_id: str, prompt: str, *, task_id: str,
-                         model: str | None = None, effort: str | None = None) -> str:
+                         model: str | None = None, effort: str | None = None,
+                         skill: str | None = None) -> str:
         response = await self.request(
             "turn/start",
             {
                 "threadId": thread_id,
-                "input": [{"type": "text", "text": prompt}],
+                "input": turn_input(prompt, skill),
                 **({"model": model} if model else {}),
                 **({"effort": effort} if effort else {}),
             },
@@ -371,10 +374,11 @@ class CodexAppServer:
             "turn/interrupt", {"threadId": thread_id, "turnId": turn_id}, timeout=20
         )
 
-    async def steer_turn(self, thread_id: str, turn_id: str, text: str) -> Any:
+    async def steer_turn(self, thread_id: str, turn_id: str, text: str,
+                         *, skill: str | None = None) -> Any:
         return await self.request("turn/steer", {
             "threadId": thread_id, "expectedTurnId": turn_id,
-            "input": [{"type": "text", "text": text}],
+            "input": turn_input(text, skill),
         }, timeout=30)
 
     async def read_rate_limits(self) -> Any:

@@ -98,6 +98,8 @@ def build(*, target: str, skip_copy: bool = False) -> Path:
         "uvicorn",
         "--collect-submodules",
         "codex_taskboard",
+        "--collect-data",
+        "codex_taskboard",
         # Conda environments often contain several optional Qt stacks.  They
         # are unrelated to this headless FastAPI sidecar, and PyInstaller
         # aborts when its matplotlib hook sees more than one binding.

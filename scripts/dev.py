@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from codex_taskboard.platforms import executable_command, process_group_options, terminate_process_tree  # noqa: E402
+from codex_taskboard.task_skills import install_skills  # noqa: E402
 
 
 def _port(value: str, name: str) -> int:
@@ -104,6 +105,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.host not in {"127.0.0.1", "localhost"}:
         print("Development mode is loopback-only; choose --host 127.0.0.1", file=sys.stderr)
         return 2
+
+    if not args.web_only:
+        try:
+            install_skills()
+        except (OSError, RuntimeError) as exc:
+            print(f"Taskboard skill installation failed: {exc}", file=sys.stderr)
+            return 1
 
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(

@@ -9,6 +9,7 @@ from typing import Any
 
 from . import git_workspace as gw
 from .constants import FAILED_RETRY_PROMPT
+from .task_skills import EXECUTE_SKILL, MERGE_SKILL, PLAN_SKILL
 from .errors import ConflictError, TaskboardError, UsageLimitExceeded, ValidationError
 from .parallel_db import rank
 
@@ -116,10 +117,10 @@ class ParallelRuntime:
         self.db.save_operation(op_id, task["id"], "execution", "uncertain", threadId=thread_id,
                                previousTurnId=previous["turnId"] if previous else None)
         try:
-            turn = await self.server.start_turn(thread_id, prompt, task_id=task["id"], **options)
+            turn = await self.server.start_turn(thread_id, prompt, task_id=task["id"], skill=EXECUTE_SKILL, **options)
         except Exception as exc:
             from .app_server import RpcFailure
-            definitive = isinstance(exc, (RpcFailure, UsageLimitExceeded))
+            definitive = isinstance(exc, (RpcFailure, UsageLimitExceeded, ValidationError))
             self.db.save_operation(op_id, task["id"], "execution", "blocked" if definitive else "uncertain", error=str(exc))
             if not definitive:
                 self.db.set_parallel(task["id"], uncertainExecution=op_id, nativeConflict=True, waitReason="回合启动结果待核对，请先确认原生会话状态")
@@ -408,15 +409,12 @@ class ParallelRuntime:
         else:
             await self.server.resume_thread(thread)
         self.server.register_thread_task(thread, task["id"])
-        prompt = (f"Resolve only the current Git merge conflicts for task {task['identifier']}: {task['title']}.\n"
+        prompt = (f"Merge conflicts for task {task['identifier']}: {task['title']}.\n"
                   f"Task requirements:\n{task['description']}\nSource commit: {data['sourceCommit']}\n"
-                  f"Target commit: {data['targetCommit']}\n"
-                  "Preserve both histories. Complete and commit the merge, perform only proportionate relevant verification. "
-                  "Do not reset/stash, publish branches, edit Taskboard, split tasks, or start other workers. "
-                  "Keep all work in this integration worktree. Report unresolved requirements in the user's language.")
+                  f"Target commit: {data['targetCommit']}\n")
         self.db.save_operation(op_id, task["id"], "merge", "uncertain", startingTurn=True)
         try:
-            turn = await self.server.start_turn(thread, prompt, task_id=task["id"], **await self.scheduler.execution_options(task["model"], task["reasoningEffort"]))
+            turn = await self.server.start_turn(thread, prompt, task_id=task["id"], skill=MERGE_SKILL, **await self.scheduler.execution_options(task["model"], task["reasoningEffort"]))
             self.db.save_operation(op_id, task["id"], "merge", "agent_running", turnId=turn, startingTurn=False)
             result = await self.server.wait_for_turn(turn)
             await self.check_aux_result(op_id, result)
@@ -655,15 +653,13 @@ class ParallelRuntime:
             thread = await self.server.start_thread(workspace)
             self.server.register_thread_task(thread, group["id"])
             self.db.save_operation(op_id, group["id"], "plan", "uncertain", threadId=thread)
-            prompt = ("Create a task decomposition proposal only. Do not implement, edit files, run commands, "
-                      "start other agents or operate Taskboard. Use only the supplied context. "
-                      "Return only JSON {\"tasks\":[{\"key\":\"a\",\"title\":\"...\",\"description\":\"...\","
-                      "\"blockedByKeys\":[],\"writeScopes\":[]}]}. Keys must be unique; dependencies must be "
-                      "acyclic and refer only to keys in this proposal. Use the task author's language.\n"
-                      + json.dumps({"title": group["title"], "description": group["description"],
-                                    "existingTasks": [{"title": c["title"], "description": c["description"]} for c in self.db.children(group["id"])]}, ensure_ascii=False))
+            prompt = json.dumps({
+                "title": group["title"], "description": group["description"],
+                "existingTasks": [{"title": c["title"], "description": c["description"]}
+                                  for c in self.db.children(group["id"])],
+            }, ensure_ascii=False)
             prompt += self.db.attachment_prompt(group["id"])
-            turn = await self.server.start_turn(thread, prompt, task_id=group["id"], **await self.scheduler.execution_options(group["model"], group["reasoningEffort"]))
+            turn = await self.server.start_turn(thread, prompt, task_id=group["id"], skill=PLAN_SKILL, **await self.scheduler.execution_options(group["model"], group["reasoningEffort"]))
             self.db.save_operation(op_id, group["id"], "plan", "agent_running", turnId=turn)
             result = await self.server.wait_for_turn(turn)
             await self.check_aux_result(op_id, result)

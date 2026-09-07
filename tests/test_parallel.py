@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from codex_taskboard.task_skills import MERGE_SKILL, PLAN_SKILL
 from codex_taskboard.db import Database
 from codex_taskboard.events import EventBus
 from codex_taskboard.scheduler import Scheduler
@@ -165,6 +166,7 @@ class ParallelTests(unittest.IsolatedAsyncioTestCase):
         await self.approve_merge(a)
         b = await self.result(b, "shared.txt", "B\n")
         async def resolve(thread, prompt, **kwargs):
+            self.assertEqual(kwargs["skill"], MERGE_SKILL)
             operation = self.db.operations(b["id"], "merge")[-1]
             root = operation["payload"]["worktreeGitRoot"]
             Path(root, "shared.txt").write_text("A and B\n")
@@ -194,6 +196,18 @@ class ParallelTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.db.get_task(task["id"])["parallel"]["paused"])
         await self.scheduler._handle_turn_result(task["id"], {"turn": {"id": "turn", "status": "completed"}})
         self.assertEqual(self.db.get_task(task["id"])["runState"], "failed")
+
+    async def test_plan_generation_explicitly_uses_plan_skill(self):
+        group = self.db.create_task(project_id=self.project["id"], title="拆分任务", kind="parallel_group")
+        self.db.save_operation("proposal", group["id"], "plan", "pending")
+        self.server.start_turn = AsyncMock(return_value="plan-turn")
+        self.server.wait_for_turn = AsyncMock(return_value={
+            "status": "completed", "output": [{"type": "agentMessage", "text": '{"tasks":[{"key":"a","title":"子任务"}]}'}],
+        })
+        await self.runtime.run_plan("proposal")
+        self.assertEqual(self.server.start_turn.call_args.kwargs["skill"], PLAN_SKILL)
+        self.assertEqual(self.db.operation("proposal")["state"], "ready")
+        self.assertEqual(self.db.children(group["id"]), [])
 
     async def test_plan_confirmation_is_atomic_and_never_executes(self):
         group = self.db.create_task(project_id=self.project["id"], title="Group", kind="parallel_group")
@@ -226,6 +240,14 @@ class ParallelTests(unittest.IsolatedAsyncioTestCase):
         watch.assert_called_once_with(task["id"], "accepted")
         self.assertFalse(self.db.get_task(task["id"])["parallel"]["uncertainExecution"])
         self.assertEqual(self.server.start_turn.await_count, 1)
+
+    async def test_missing_skill_is_a_definitive_failure_without_uncertain_turn(self):
+        task = self.task()
+        self.server.start_turn = AsyncMock(side_effect=ValidationError("skill not installed"))
+        with self.assertRaises(ValidationError):
+            await self.runtime.execution_turn(task, "existing", "work", {})
+        self.assertEqual(self.db.operations(task["id"], "execution")[-1]["state"], "blocked")
+        self.assertFalse(self.db.get_task(task["id"])["parallel"].get("uncertainExecution"))
 
     async def test_target_advance_reprepares_and_queued_followup_invalidates_review(self):
         task = await self.result(self.task())

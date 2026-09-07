@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -65,11 +66,16 @@ def smoke(binary: Path) -> None:
                 "--control-file",
                 str(control_file),
             ],
+            env={**os.environ, "CODEX_HOME": str(Path(data_dir) / "codex-home")},
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
         try:
             wait_for_health(port, process)
+            for mode in ("execute", "plan", "merge"):
+                skill = Path(data_dir) / "codex-home/skills" / f"codex-taskboard-{mode}"
+                if not (skill / "SKILL.md").is_file() or "allow_implicit_invocation: false" not in (skill / "agents/openai.yaml").read_text():
+                    raise RuntimeError(f"sidecar did not install the explicit-only skill: {skill.name}")
             opener = build_opener(ProxyHandler({}))
             with opener.open(f"http://127.0.0.1:{port}/", timeout=3) as response:
                 if response.status != 200 or b"<html" not in response.read().lower():

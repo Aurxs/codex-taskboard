@@ -618,7 +618,9 @@ app = create_app()
 
 def main() -> None:
     import uvicorn
+    from .task_skills import install_skills
 
+    install_skills()
     uvicorn.run(
         "codex_taskboard.app:app",
         host=os.environ.get("CODEX_TASKBOARD_HOST", "127.0.0.1"),

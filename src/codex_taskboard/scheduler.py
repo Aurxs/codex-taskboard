@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .app_server import CodexAppServer, extract_identifier, usage_error_info
+from .task_skills import EXECUTE_SKILL
 from .constants import (
     APPROVAL_METHODS,
     FAILED_RETRY_PROMPT,
@@ -394,7 +395,7 @@ class Scheduler:
             if not turns:
                 active = self._task_turns.get(task_id)
             if active:
-                await self.server.steer_turn(task["threadId"], active, text.strip())
+                await self.server.steer_turn(task["threadId"], active, text.strip(), skill=EXECUTE_SKILL)
                 return self.db.get_task(task_id)
             if task_id in self._execution_tasks and not self._execution_tasks[task_id].done():
                 raise ConflictError("Codex 正在启动或结束回合，请稍后发送")
@@ -835,10 +836,9 @@ class Scheduler:
                 task = {**task, "model": task["model"] or parent["model"],
                         "reasoningEffort": task["reasoningEffort"] or (parent["reasoningEffort"] if not task["model"] else None)}
             if task["writeScopes"]:
-                prompt += "\nDeclared modification scope (request clarification before expanding):\n" + "\n".join(task["writeScopes"])
+                prompt += "\nDeclared modification scope:\n" + "\n".join(task["writeScopes"])
             if task["parallel"].get("validationBase"):
-                prompt += (f"\nDependency results changed. This worktree is integrating revision {task['parallel']['validationBase']}. "
-                           "Resolve any pending merge conflicts, revalidate this task against the updated dependencies, and commit the result.")
+                prompt += f"\nDependency integration revision: {task['parallel']['validationBase']}"
             if continuation_prompt is None:
                 prompt += self.db.attachment_prompt(task_id)
             await self._set_task(task_id, run_state=RunState.RUNNING.value)
