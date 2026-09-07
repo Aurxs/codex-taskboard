@@ -56,10 +56,21 @@ try {
   await composer.waitFor();
   const box = await composer.boundingBox();
   const form = ui.locator('.task-followup');
-  assert.ok((await form.boundingBox()).height <= 150, 'composer uses a compact height');
+  assert.ok((await form.boundingBox()).height <= 96, 'composer uses a compact height');
+  assert.equal(await form.evaluate(el => getComputedStyle(el).margin), '0px', 'composer has no extra outer whitespace');
   assert.notEqual(await form.evaluate(el => getComputedStyle(el).boxShadow), 'none', 'composer has a subtle surrounding shadow');
   assert.equal(await form.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)', 'composer uses the white raised surface');
   assert.equal(await composer.evaluate(el => getComputedStyle(el).resize), 'none', 'no resize handle');
+  await composer.blur();
+  const unfocusedStyle = await form.evaluate(el => {
+    const style = getComputedStyle(el);
+    return [style.borderColor, style.backgroundColor, style.boxShadow];
+  });
+  await composer.focus();
+  assert.deepEqual(await form.evaluate(el => {
+    const style = getComputedStyle(el);
+    return [style.borderColor, style.backgroundColor, style.boxShadow];
+  }), unfocusedStyle, 'focus does not change composer appearance');
   assert.equal(await ui.getByRole('button', { name: '发送跟进消息' }).isDisabled(), true);
   await composer.fill('第一行');
   await composer.press('Shift+Enter');
@@ -67,7 +78,7 @@ try {
   assert.equal(await composer.inputValue(), '第一行\na');
   await composer.fill('多行内容\n'.repeat(20));
   assert.ok(await composer.evaluate(el => el.scrollHeight > el.clientHeight), 'long messages scroll inside composer');
-  assert.ok((await form.boundingBox()).height <= 150, 'long drafts keep composer compact');
+  assert.ok((await form.boundingBox()).height <= 96, 'long drafts keep composer compact');
   await composer.fill('');
   await ui.locator('.issue-detail-main-scroll').evaluate(el => { el.scrollTop = el.scrollHeight; });
   assert.deepEqual(await composer.boundingBox(), box, 'composer stays fixed while history scrolls');
