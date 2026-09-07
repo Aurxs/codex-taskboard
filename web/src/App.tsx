@@ -431,9 +431,9 @@ function EmbeddedTaskboard() {
     }
   }, [notify, refreshTasks, updateTaskInState]);
 
-  const performAction = useCallback(async (task: Task, action: TaskAction, feedback?: string, targetStatus?: "in_review" | "done") => {
+  const performAction = useCallback(async (task: Task, action: TaskAction, feedback?: string, targetStatus?: "in_review" | "done", attachmentIds?: string[]) => {
     try {
-      const next = await taskAction(task.id, action, task.version, feedback, targetStatus);
+      const next = await taskAction(task.id, action, task.version, feedback, targetStatus, attachmentIds);
       updateTaskInState(next);
       notify(next.queued ? t("已排队") : action === "complete" && next.status === "done" ? t("任务已完成") : action === "complete" && next.mergeState === "queued" ? t("等待合入") : action === "run" || action === "retry" ? t("任务已提交给 Codex") : t("操作已提交"), "success");
       return next;

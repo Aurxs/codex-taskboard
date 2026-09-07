@@ -107,7 +107,8 @@ class ParallelRuntime:
         self.db.save_operation(op_id, task["id"], "execution_thread", "ready", threadId=thread)
         return thread
 
-    async def execution_turn(self, task: dict, thread_id: str, prompt: str, options: dict) -> str:
+    async def execution_turn(self, task: dict, thread_id: str, prompt: str, options: dict,
+                             *, include_skill: bool = True) -> str:
         question_reply = prompt.startswith(REPLY_OPEN)
         if not question_reply:
             prompt += self.db.plan_prompt(task["id"])
@@ -123,7 +124,7 @@ class ParallelRuntime:
         self.db.save_operation(op_id, task["id"], "execution", "uncertain", threadId=thread_id,
                                previousTurnId=previous["turnId"] if previous else None)
         try:
-            turn = await self.server.start_turn(thread_id, prompt, task_id=task["id"], skill=None if question_reply else EXECUTE_SKILL, **options)
+            turn = await self.server.start_turn(thread_id, prompt, task_id=task["id"], skill=EXECUTE_SKILL if include_skill and not question_reply else None, **options)
         except Exception as exc:
             from .app_server import RpcFailure
             definitive = isinstance(exc, (RpcFailure, UsageLimitExceeded, ValidationError))

@@ -34,6 +34,7 @@ class FakeAppServer:
         self.start_thread_calls: list[str] = []
         self.resume_calls: list[str] = []
         self.turn_calls: list[tuple[str, str, str]] = []
+        self.turn_skills: list[str | None] = []
         self.interrupt_calls: list[tuple[str, str]] = []
         self.read_snapshots: dict[str, object] = {}
         self.read_limits = {"resetsAt": "2000-01-01T00:00:00+00:00"}
@@ -73,7 +74,7 @@ class FakeAppServer:
         return self.read_snapshots.get(thread_id, {})
 
     async def start_turn(self, thread_id: str, prompt: str, *, task_id: str, skill=None):
-        assert skill == EXECUTE_SKILL
+        self.turn_skills.append(skill)
         self._turn_number += 1
         turn_id = f"turn-{self._turn_number}"
         self.turn_calls.append((thread_id, prompt, task_id))
@@ -163,10 +164,12 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_followup_steers_active_turn_and_starts_same_thread_when_done(self):
         task = self.running_task(self.project(review_required=False))
+        task = self.db.update_task(task["id"], task["version"], attachments=[
+            {"name": "old.txt", "content": "YQ=="}])
         self.scheduler._register_turn(task["id"], "turn-1")
         self.server.steer_turn = AsyncMock(return_value={"turnId": "turn-1"})
         await self.scheduler.action(task["id"], "follow_up", task["version"], "补充")
-        self.server.steer_turn.assert_awaited_once_with("thread-1", "turn-1", "补充", skill=EXECUTE_SKILL)
+        self.server.steer_turn.assert_awaited_once_with("thread-1", "turn-1", "补充", skill=None)
         self.assertEqual(self.server.turn_calls, [])
         await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
         task = self.db.get_task(task["id"])
@@ -175,26 +178,60 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
             continued = await self.scheduler.action(task["id"], "follow_up", task["version"], "再优化")
             watch.assert_called_once_with(task["id"], "followup-turn")
         self.assertEqual(continued["status"], "in_progress")
-        self.server.start_turn.assert_awaited_once_with("thread-1", "再优化", task_id=task["id"], skill=EXECUTE_SKILL)
+        self.server.start_turn.assert_awaited_once_with("thread-1", "再优化", task_id=task["id"], skill=None)
         await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
         self.assertEqual(self.db.get_task(task["id"])["status"], "in_progress")
         self.assertEqual(self.scheduler._task_turns[task["id"]], "followup-turn")
 
-    async def test_followup_includes_readable_attachments_for_active_and_completed_turns(self):
+    async def test_followup_includes_only_selected_readable_attachments_for_active_and_completed_turns(self):
         task = self.running_task(self.project(review_required=False))
         task = self.db.update_task(task["id"], task["version"], attachments=[
+            {"name": "old.txt", "content": "YQ=="},
             {"name": "context.txt", "content": "Y29udGV4dA=="}])
-        prompt = "查看附件" + self.db.attachment_prompt(task["id"])
+        attachment_ids = [task["attachments"][1]["id"]]
+        prompt = "查看附件" + self.db.attachment_prompt(task["id"], attachment_ids)
+        self.assertNotIn("old.txt", prompt)
+        self.assertIn("context.txt", prompt)
         self.scheduler._register_turn(task["id"], "turn-1")
         self.server.steer_turn = AsyncMock(return_value={"turnId": "turn-1"})
-        await self.scheduler.action(task["id"], "follow_up", task["version"], "查看附件")
-        self.server.steer_turn.assert_awaited_once_with("thread-1", "turn-1", prompt, skill=EXECUTE_SKILL)
+        await self.scheduler.action(task["id"], "follow_up", task["version"], "查看附件", attachment_ids=attachment_ids)
+        self.server.steer_turn.assert_awaited_once_with("thread-1", "turn-1", prompt, skill=None)
         await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
         task = self.db.get_task(task["id"])
         self.server.start_turn = AsyncMock(return_value="attachment-turn")
         with patch.object(self.scheduler, "_spawn_existing_watch"):
-            await self.scheduler.action(task["id"], "follow_up", task["version"], "查看附件")
-        self.server.start_turn.assert_awaited_once_with("thread-1", prompt, task_id=task["id"], skill=EXECUTE_SKILL)
+            await self.scheduler.action(task["id"], "follow_up", task["version"], "查看附件", attachment_ids=attachment_ids)
+        self.server.start_turn.assert_awaited_once_with("thread-1", prompt, task_id=task["id"], skill=None)
+
+    async def test_followup_rejects_foreign_and_missing_attachments_before_sending(self):
+        project = self.project()
+        task = self.running_task(project)
+        other = self.db.create_task(project_id=project["id"], title="other", attachments=[
+            {"name": "private.txt", "content": "YQ=="}])
+        self.server.steer_turn = AsyncMock()
+        for attachment_id in [other["attachments"][0]["id"], "missing"]:
+            with self.assertRaises(ValidationError):
+                await self.scheduler.action(task["id"], "follow_up", task["version"], "补充",
+                                            attachment_ids=[attachment_id])
+        self.server.steer_turn.assert_not_awaited()
+        self.assertEqual(self.server.turn_calls, [])
+
+    async def test_queued_followup_keeps_selected_attachments_without_reloading_skill(self):
+        task = self.running_task(self.project(review_required=False))
+        task = self.db.update_task(task["id"], task["version"], attachments=[
+            {"name": "old.txt", "content": "YQ=="}, {"name": "new.txt", "content": "Yg=="}])
+        await self.scheduler._handle_turn_result(task["id"], {"turnId": "turn-1", "status": "completed"})
+        task = self.db.get_task(task["id"])
+        with patch.object(self.db, "claim_candidate", return_value=None):
+            await self.scheduler.action(task["id"], "follow_up", task["version"], "补充",
+                                        attachment_ids=[task["attachments"][1]["id"]])
+        with patch.object(self.scheduler, "_spawn_execution") as spawn:
+            await self.scheduler.parallel.dispatch()
+        task_id, prompt = spawn.call_args.args
+        await self.scheduler._execute_task(task_id, prompt)
+        self.assertIn("new.txt", self.server.turn_calls[0][1])
+        self.assertNotIn("old.txt", self.server.turn_calls[0][1])
+        self.assertEqual(self.server.turn_skills, [None])
 
     async def test_failed_followup_does_not_change_completed_task(self):
         task = self.running_task(self.project(review_required=False))
@@ -428,6 +465,7 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.server.start_thread_calls, [])
         self.assertEqual(self.server.turn_calls[0][0], "thread-existing")
         self.assertEqual(self.server.turn_calls[0][1], QUOTA_RESUME_PROMPT)
+        self.assertEqual(self.server.turn_skills, [None])
         self.assertEqual(self.db.get_task(task["id"])["status"], TaskStatus.DONE.value)
 
     async def test_attachment_paths_reach_codex_turn(self):
@@ -438,6 +476,7 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
         await self.scheduler._execute_task(task["id"], None)
         self.assertIn(self.db.attachment_prompt(task["id"]), self.server.turn_calls[0][1])
         self.assertIn("notes.md", self.server.turn_calls[0][1])
+        self.assertEqual(self.server.turn_skills, [EXECUTE_SKILL])
 
     async def test_initial_and_failed_retry_prompts_are_exact_and_keep_thread(self) -> None:
         project = self.project("PROMPT", review_required=False)

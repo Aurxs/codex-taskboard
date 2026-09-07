@@ -286,10 +286,11 @@ export async function taskAction(
   version: number,
   feedback?: string,
   targetStatus?: "in_review" | "done",
+  attachmentIds?: string[],
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/tasks/${encodeURIComponent(id)}/actions`, {
     method: "POST",
-    body: JSON.stringify({ action, version, requestId: crypto.randomUUID(), ...(feedback ? { feedback } : {}), ...(targetStatus ? { targetStatus } : {}) }),
+    body: JSON.stringify({ action, version, requestId: crypto.randomUUID(), ...(feedback ? { feedback } : {}), ...(targetStatus ? { targetStatus } : {}), ...(attachmentIds?.length ? { attachmentIds } : {}) }),
   }));
 }
 

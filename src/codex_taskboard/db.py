@@ -832,9 +832,15 @@ class Database(ParallelDatabase):
             path.write_bytes(content)
         return path
 
-    def attachment_prompt(self, task_id: str) -> str:
+    def attachment_prompt(self, task_id: str, attachment_ids: list[str] | None = None) -> str:
         task = self.get_task(task_id)
-        paths = [str(self.attachment_path(item["id"])) for item in task["attachments"]]
+        attachments = task["attachments"]
+        if attachment_ids is not None:
+            selected = set(attachment_ids)
+            if selected - {item["id"] for item in attachments}:
+                raise ValidationError("附件不存在或不属于当前任务")
+            attachments = [item for item in attachments if item["id"] in selected]
+        paths = [str(self.attachment_path(item["id"])) for item in attachments]
         return "\n\nTask attachments (read the documents or view the images):\n" + "\n".join(paths) if paths else ""
 
     @staticmethod

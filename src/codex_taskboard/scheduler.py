@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .app_server import CodexAppServer, extract_identifier, usage_error_info
-from .task_skills import EXECUTE_SKILL
 from .constants import (
     APPROVAL_METHODS,
     FAILED_RETRY_PROMPT,
@@ -276,6 +275,7 @@ class Scheduler:
         feedback: str | None = None,
         *,
         target_status: str | None = None,
+        attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         task = self.db.get_task(task_id)
         if int(task["version"]) != expected_version:
@@ -296,7 +296,7 @@ class Scheduler:
             return await self.run_task(task_id, expected_version)
 
         if action == "follow_up":
-            return await self.follow_up(task_id, expected_version, feedback)
+            return await self.follow_up(task_id, expected_version, feedback, attachment_ids=attachment_ids)
 
         if action == "interrupt_requeue":
             self._require_status(task, TaskStatus.IN_PROGRESS)
@@ -386,7 +386,8 @@ class Scheduler:
 
         raise ValidationError(f"Unknown task action {action!r}")
 
-    async def follow_up(self, task_id: str, expected_version: int, text: str | None) -> dict[str, Any]:
+    async def follow_up(self, task_id: str, expected_version: int, text: str | None,
+                        *, attachment_ids: list[str] | None = None) -> dict[str, Any]:
         async with self._followup_lock:
             task = self.db.get_task(task_id)
             if task["version"] != expected_version:
@@ -395,7 +396,7 @@ class Scheduler:
                 raise ValidationError("跟进消息不能为空")
             if not task["threadId"] or task["status"] not in {"in_progress", "in_review", "done"}:
                 raise ValidationError("当前任务没有可跟进的 Codex 会话")
-            text = text.strip() + self.db.attachment_prompt(task_id)
+            text = text.strip() + self.db.attachment_prompt(task_id, attachment_ids or [])
             await self._ensure_server()
             snapshot = await self.server.read_thread(task["threadId"], include_turns=True)
             turns = snapshot.get("thread", {}).get("turns", [])
@@ -405,7 +406,7 @@ class Scheduler:
                 active = self._task_turns.get(task_id)
             if active:
                 await self.server.steer_turn(task["threadId"], active, text.strip(),
-                                             skill=None if text.strip().startswith(REPLY_OPEN) else EXECUTE_SKILL)
+                                             skill=None)
                 return self.db.get_task(task_id)
             if task_id in self._execution_tasks and not self._execution_tasks[task_id].done():
                 raise ConflictError("Codex 正在启动或结束回合，请稍后发送")
@@ -426,7 +427,7 @@ class Scheduler:
                 if self.db.get_task(task_id)["parallel"].get("paused") or (parent and self.db.get_task(parent["id"])["groupPhase"] != "submitted"):
                     raise ConflictError("任务已暂停，请继续后再发送跟进")
                 self.server.register_thread_task(task["threadId"], task_id)
-                turn_id = await self.parallel.execution_turn(task, task["threadId"], text.strip(), options)
+                turn_id = await self.parallel.execution_turn(task, task["threadId"], text.strip(), options, include_skill=False)
                 if task["parallel"].get("managed"):
                     self.db.mark_downstream_stale(task_id)
                 await self._adopt_turn(task_id, {"id": turn_id, "status": "inProgress"})
@@ -884,7 +885,8 @@ class Scheduler:
                 parent = self.db.get_task(task["parentId"])
                 if not question_reply:
                     prompt = (f"Parent task: {parent['title']}\nOverall requirements:\n{parent['description']}\n\n" + prompt)
-                    prompt += self.db.attachment_prompt(parent["id"])
+                    if not resuming or continuation_prompt is None:
+                        prompt += self.db.attachment_prompt(parent["id"])
                 task = {**task, "model": task["model"] or parent["model"],
                         "reasoningEffort": task["reasoningEffort"] or (parent["reasoningEffort"] if not task["model"] else None)}
             if task["writeScopes"] and not question_reply:
@@ -898,7 +900,7 @@ class Scheduler:
             current = self.db.get_task(task_id)
             if current["parallel"].get("paused") or current["status"] != "in_progress" or (current["parentId"] and self.db.get_task(current["parentId"])["groupPhase"] != "submitted"):
                 return
-            turn_id = await self.parallel.execution_turn(task, thread_id, prompt, options)
+            turn_id = await self.parallel.execution_turn(task, thread_id, prompt, options, include_skill=not resuming or continuation_prompt is None)
             self._register_turn(task_id, turn_id)
             self._starting_tasks.discard(task_id)
             run = self.db.latest_run(task_id)

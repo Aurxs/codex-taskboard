@@ -127,6 +127,7 @@ class ActionBody(StrictModel):
     version: int = Field(ge=1)
     feedback: str | None = None
     targetStatus: Literal["in_review", "done"] | None = None
+    attachmentIds: list[str] = Field(default_factory=list, max_length=10)
     requestId: str | None = None
 
 
@@ -538,6 +539,7 @@ def create_app(
             body.version,
             body.feedback,
             target_status=body.targetStatus,
+            attachment_ids=body.attachmentIds,
         )
         if body.requestId:
             db.save_operation(body.requestId, task_id, "action", "completed", action=body.action)

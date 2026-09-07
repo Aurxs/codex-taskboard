@@ -102,7 +102,7 @@ export function TaskDetail({
   onBack: () => void;
   onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[]; removeAttachmentIds?: string[] })) => Promise<Task | null>;
   onDependencies: (task: Task, ids: string[]) => Promise<Task | null>;
-  onAction: (task: Task, action: TaskAction, feedback?: string, targetStatus?: "in_review" | "done") => Promise<Task | null>;
+  onAction: (task: Task, action: TaskAction, feedback?: string, targetStatus?: "in_review" | "done", attachmentIds?: string[]) => Promise<Task | null>;
   onResolveInteraction: (interaction: Interaction, response: unknown) => Promise<void>;
 }) {
   const [current, setCurrent] = useState(task);
@@ -136,7 +136,7 @@ export function TaskDetail({
     setSending(true);
     const text = followup;
     try {
-      const next = await onAction(current, "follow_up", text.trim() || t("请查看附件。"));
+      const next = await onAction(current, "follow_up", text.trim() || t("请查看附件。"), undefined, followupAttachments.map(file => file.id));
       if (next) {
         setCurrent(previous => next.version >= previous.version ? next : previous);
         setFollowup(value => value === text ? "" : value);

@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import unittest
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 try:
     import httpx
@@ -45,6 +45,20 @@ class HttpContractTests(unittest.IsolatedAsyncioTestCase):
         await self.app.state.scheduler.stop()
         self.app.state.db.close()
         self.temp_dir.cleanup()
+
+    async def test_followup_passes_only_explicit_attachment_ids(self):
+        db = self.app.state.db
+        project = db.create_project(key="FOLLOWUP", name="Followup", workspace_path=self.temp_dir.name)
+        task = db.create_task(project_id=project["id"], title="Followup", attachments=[
+            {"name": "notes.md", "content": "YQ=="}])
+        ids = [task["attachments"][0]["id"]]
+        for extra, expected in [({}, []), ({"attachmentIds": ids}, ids)]:
+            with patch.object(self.app.state.scheduler, "action", new=AsyncMock(return_value=task)) as action:
+                response = await self.client.post(f"/api/tasks/{task['id']}/actions", json={
+                    "action": "follow_up", "version": task["version"], "feedback": "补充", **extra})
+                self.assertEqual(response.status_code, 200)
+                action.assert_awaited_once_with(task["id"], "follow_up", task["version"], "补充",
+                                               target_status=None, attachment_ids=expected)
 
     async def test_create_draft_with_attachment_and_download(self):
         project = self.app.state.db.create_project(key="FILES", name="Files", workspace_path=self.temp_dir.name)
