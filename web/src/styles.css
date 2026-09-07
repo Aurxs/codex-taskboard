@@ -12026,7 +12026,6 @@ kbd {
 .app-shell .issue-properties { min-height: 0; overflow: auto; position: static; scrollbar-width: thin; }
 /* Native-style follow-up composer, with only attachment and send controls. */
 .task-followup { flex-shrink: 0; margin: 8px 6px; padding: 10px 12px 8px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface-raised); box-shadow: 0 0 6px #00000006, 0 3px 14px #00000008; overflow: hidden; }
-.task-followup:focus-within { border-color: var(--text-tertiary); }
 .task-followup textarea { display: block; box-sizing: border-box; width: 100%; height: 40px; min-height: 0; max-height: 180px; resize: none; overflow: auto; padding: 2px 4px; border: 0; outline: none; background: transparent; color: var(--text-primary); font: inherit; font-size: 13px; line-height: 20px; scrollbar-width: thin; }
 .task-followup textarea::placeholder { color: var(--text-tertiary); }
 .task-followup-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 4px; }

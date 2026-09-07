@@ -60,6 +60,16 @@ try {
   assert.notEqual(await form.evaluate(el => getComputedStyle(el).boxShadow), 'none', 'composer has a subtle surrounding shadow');
   assert.equal(await form.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(255, 255, 255)', 'composer uses the white raised surface');
   assert.equal(await composer.evaluate(el => getComputedStyle(el).resize), 'none', 'no resize handle');
+  await composer.blur();
+  const unfocusedStyle = await form.evaluate(el => {
+    const style = getComputedStyle(el);
+    return [style.borderColor, style.backgroundColor, style.boxShadow];
+  });
+  await composer.focus();
+  assert.deepEqual(await form.evaluate(el => {
+    const style = getComputedStyle(el);
+    return [style.borderColor, style.backgroundColor, style.boxShadow];
+  }), unfocusedStyle, 'focus does not change composer appearance');
   assert.equal(await ui.getByRole('button', { name: '发送跟进消息' }).isDisabled(), true);
   await composer.fill('第一行');
   await composer.press('Shift+Enter');
