@@ -1,0 +1,67 @@
+name: Package macOS and Windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            python-architecture: arm64
+            target: aarch64-apple-darwin
+            artifact-path: output/*.dmg
+          - platform: windows-x64
+            runner: windows-2022
+            python-architecture: x64
+            target: x86_64-pc-windows-msvc
+            artifact-path: output/*-setup.exe
+    env:
+      PYTHONUTF8: '1'
+      PYTHONWARNINGS: ignore::DeprecationWarning
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: ${{ matrix.python-architecture }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Python dependencies
+        run: python -m pip install -e . pyinstaller
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Build macOS DMG and verify bundled sidecar
+        if: runner.os == 'macOS'
+        run: bash scripts/build_macos.sh
+      - name: Build Windows installer and verify frozen sidecar
+        if: runner.os == 'Windows'
+        run: python scripts/build_windows.py
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-taskboard-${{ matrix.platform }}
+          path: ${{ matrix.artifact-path }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

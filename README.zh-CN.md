@@ -151,6 +151,12 @@ npm ci
 
 Windows 图标位于任务栏右侧通知区域，菜单、任务面板与 macOS 共用。数据保存在 `%APPDATA%\com.codex.taskboard`。详细说明和待实机验收项目见 [Windows 使用与开发](docs/windows.zh-CN.md)。
 
+## GitHub Actions 手动打包
+
+打开 [Actions → Package macOS and Windows](https://github.com/Aurxs/codex-taskboard/actions/workflows/package.yml)，点击 **Run workflow**，选择分支并确认。该工作流仅手动触发，两端独立构建，复用现有打包脚本及其冻结 sidecar 冒烟检查。
+
+成功后，在该次运行的 **Artifacts** 中下载安装包：`codex-taskboard-macos-arm64` 包含 Apple Silicon DMG，`codex-taskboard-windows-x64` 包含 NSIS 安装 EXE。产物保留 30 天。工作流无需配置签名密钥；macOS 使用 ad-hoc 签名，未经 Apple 公证，Windows 安装包未签名。
+
 ## 构建 macOS App 与 DMG
 
 打包还需要 Rust、Tauri CLI、PyInstaller 和 Apple Silicon macOS。先安装项目依赖，再执行：

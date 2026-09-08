@@ -153,6 +153,12 @@ npm ci
 
 On Windows the icon lives in the taskbar notification area. Menus, UI, scheduling, and the desktop bridge are shared with macOS; native APIs are isolated in platform modules. Data is stored in `%APPDATA%\com.codex.taskboard`. Windows CI builds the installer and runs a frozen-sidecar smoke without connecting to Codex. Actual Windows Codex integration still needs desktop acceptance testing; see the [Windows guide and verification status (Chinese)](docs/windows.zh-CN.md).
 
+## Manual GitHub Actions packaging
+
+Open [Actions → Package macOS and Windows](https://github.com/Aurxs/codex-taskboard/actions/workflows/package.yml), click **Run workflow**, select a branch, and confirm. This workflow runs only when manually triggered and builds both platforms independently using the existing packaging scripts and their frozen-sidecar smoke checks.
+
+After it succeeds, download the installers from the run's **Artifacts** section: `codex-taskboard-macos-arm64` contains the Apple Silicon DMG, and `codex-taskboard-windows-x64` contains the NSIS setup EXE. Artifacts are retained for 30 days. The workflow requires no signing secrets; the macOS package uses ad-hoc signing without Apple notarization, and the Windows installer is unsigned.
+
 ## Building the macOS App and DMG
 
 Packaging also requires Rust, the Tauri CLI, PyInstaller, and Apple Silicon macOS. Install the project dependencies first, then run:
