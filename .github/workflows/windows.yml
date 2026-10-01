@@ -24,7 +24,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - run: python -m pip install -e . pyinstaller httpx ruff
+      - run: python -m pip install -e . pyinstaller httpx ruff==0.16.9
       - run: npm ci
       - name: Platform and shared integration contracts
         run: python -m unittest tests.test_platforms tests.test_injector_profile tests.test_app_server_contract tests.test_worktree_bridge tests.test_browser_bridge tests.test_i18n_bridge tests.test_parallel

@@ -37,6 +37,25 @@ class DatabaseContractTests(unittest.TestCase):
                 (value, value, task_id),
             )
 
+    def test_v8_migration_preserves_lease_and_defaults_planning_off(self):
+        project = self.db.create_project(key="MIG", name="Migration", workspace_path=self.temp_dir.name)
+        task = self.db.create_task(project_id=project["id"], title="Preserved")
+        self.db.claim_task(task["id"], task["version"])
+        for column in ("agent_planning_enabled", "max_concurrent_tasks", "verification_commands"):
+            self.db._conn.execute(f"ALTER TABLE projects DROP COLUMN {column}")
+        self.db._conn.execute("ALTER TABLE tasks DROP COLUMN shared_resources")
+        self.db._conn.execute("DROP TABLE resource_leases")
+        self.db._conn.execute("UPDATE schema_meta SET version=8")
+        path = self.db.path
+        self.db.close()
+        self.db = Database(path)
+        current = self.db.get_project(project["id"])
+        self.assertFalse(current["agentPlanningEnabled"])
+        self.assertEqual(current["verificationCommands"], [])
+        self.assertEqual(current["maxConcurrentTasks"], 0)
+        self.assertEqual(self.db.get_task(task["id"])["status"], "in_progress")
+        self.assertIsNotNone(self.db._conn.execute("SELECT 1 FROM execution_leases WHERE task_id=?", (task["id"],)).fetchone())
+
     def test_completed_time_survives_later_edits(self):
         project = self.project()
         task = self.task(project["id"], "completion time")

@@ -155,6 +155,15 @@
   // Reusing the native button preserves Codex's spacing, icon sizing,
   // tooltip and collapsed-sidebar behavior.
   function findReferenceButton() {
+    // ChatGPT 26.928 moved the fixed navigation above the scrolling tasks.
+    // Prefer the visible native text row; route attributes are not labels.
+    const modern = Array.from(document.querySelectorAll('[data-slate-sidebar-content] button[data-sidebar-destination="builtin:orbit"]'))
+      .find((button) => button.getBoundingClientRect().width > 0 && button.getBoundingClientRect().height > 0);
+    if (modern) return modern;
+    const modernNewChat = Array.from(document.querySelectorAll('[data-slate-sidebar-content] button'))
+      .find((button) => buttonMatches(button, ["新聊天", "新建任务", "新对话", "new chat", "new task"])
+        && button.getBoundingClientRect().width > 0 && button.getBoundingClientRect().height > 0);
+    if (modernNewChat) return modernNewChat;
     const scroll = document.querySelector("[data-app-action-sidebar-scroll]");
     if (!scroll) return null;
     const buttons = Array.from(scroll.querySelectorAll("button"));
@@ -171,8 +180,15 @@
   }
 
   function replaceEntryIcon(button) {
-    const icon = button.querySelector("svg");
-    if (!icon) return;
+    let icon = button.querySelector("svg");
+    if (!icon) {
+      const image = button.querySelector('img[aria-hidden="true"]');
+      if (!image) return;
+      icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      icon.setAttribute("class", image.getAttribute("class") || "icon-leading");
+      icon.setAttribute("aria-hidden", "true");
+      image.replaceWith(icon);
+    }
     icon.setAttribute("viewBox", "0 0 24 24");
     icon.setAttribute("fill", "none");
     icon.setAttribute("stroke", "currentColor");
@@ -195,7 +211,7 @@
     button.id = ENTRY_ID;
     button.type = "button";
     button.removeAttribute("disabled");
-    ["aria-expanded", "aria-controls", "aria-describedby", "data-state", "aria-current"].forEach((name) => button.removeAttribute(name));
+    ["aria-expanded", "aria-controls", "aria-describedby", "data-state", "aria-current", "data-selected", "data-sidebar-destination", "data-slate-sidebar-peek-area"].forEach((name) => button.removeAttribute(name));
     button.setAttribute(OWNED_ATTRIBUTE, "true");
     button.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
     entryLabel = button.querySelector(".text-fade-truncate")
@@ -231,7 +247,8 @@
   function findPageHost() {
     const direct = document.querySelector(".app-shell-main-content-frame");
     if (direct?.closest?.("[data-app-shell-main-content-layout]")) return direct;
-    const viewport = document.querySelector("[data-app-shell-main-content-layout]");
+    const viewport = Array.from(document.querySelectorAll("[data-app-shell-main-content-layout]"))
+      .find((node) => node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0);
     if (!viewport) return null;
     const viewportRect = viewport.getBoundingClientRect();
     return Array.from(viewport.children).find((candidate) => {

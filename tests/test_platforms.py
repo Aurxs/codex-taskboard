@@ -3,18 +3,22 @@ from __future__ import annotations
 
 import base64
 import os
-from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
-from tempfile import TemporaryDirectory
 import unittest
+from pathlib import Path, PureWindowsPath
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from codex_taskboard import platforms
-from codex_taskboard.platforms import windows
-from codex_taskboard.git_workspace import normalize_scopes
 from codex_taskboard.errors import ValidationError
-from injector.cdp_injector import CdpInjector, _default_profile_path, without_taskboard_launcher_environment
+from codex_taskboard.git_workspace import normalize_scopes
+from codex_taskboard.platforms import windows
+from injector.cdp_injector import (
+    CdpInjector,
+    _default_profile_path,
+    without_taskboard_launcher_environment,
+)
 from injector.sidecar import default_data_directory
 from scripts.build_sidecar import native_target, validate_target
 
@@ -48,9 +52,8 @@ class PlatformTests(unittest.TestCase):
             executable.touch()
             with patch.dict(os.environ, {"CODEX_TASKBOARD_CODEX_APP": str(executable)}):
                 self.assertEqual(windows.discover_app(), executable.resolve())
-            with patch.dict(os.environ, {"CODEX_TASKBOARD_CODEX_APP": root}):
-                with self.assertRaisesRegex(RuntimeError, "desktop .exe"):
-                    windows.discover_app()
+            with patch.dict(os.environ, {"CODEX_TASKBOARD_CODEX_APP": root}), self.assertRaisesRegex(RuntimeError, "desktop .exe"):
+                windows.discover_app()
 
     def test_folder_picker_passes_text_as_data_and_preserves_unicode(self):
         prompt = '目录 "quoted"; $env:PATH'

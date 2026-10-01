@@ -18,6 +18,7 @@ from urllib.parse import quote
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
+from .desktop_server import DesktopAppServer
 from . import __version__
 from .db import Database
 from .errors import ConflictError, TaskboardError, UnsupportedError, ValidationError
@@ -42,6 +43,9 @@ class ProjectCreateBody(StrictModel):
 
 class ProjectUpdateBody(StrictModel):
     version: int = Field(ge=1)
+    agentPlanningEnabled: bool | None = None
+    maxConcurrentTasks: int | None = Field(default=None, ge=0, le=64)
+    verificationCommands: list[list[str]] | None = None
     key: str | None = None
     name: str | None = None
     workspacePath: str | None = None
@@ -78,6 +82,7 @@ class TaskExecutionBody(StrictModel):
     kind: Literal["task", "parallel_group"] = "task"
     schedulingMode: Literal["exclusive", "parallel"] = "exclusive"
     writeScopes: list[str] = Field(default_factory=list)
+    sharedResources: list[str] = Field(default_factory=list)
     targetBranch: str | None = Field(default=None, min_length=1, max_length=255)
 
 
@@ -244,6 +249,19 @@ def create_app(
     @app.get("/health")
     async def health() -> dict[str, Any]:
         return {"ok": True, "version": __version__, "schedulerRunning": scheduler.running}
+
+    @app.get("/api/diagnostics")
+    async def diagnostics() -> dict[str, Any]:
+        from .compatibility import host_diagnostics
+        result = host_diagnostics()
+        result["transport"] = {"adapter": type(scheduler.server).__name__, "connected": scheduler.server.running}
+        if isinstance(scheduler.server, DesktopAppServer) and scheduler.server.available():
+            try:
+                await scheduler._ensure_server()
+                result["ui"] = {"adapter": "electron-cdp", "status": "probed", "capabilities": await scheduler.server.request("desktop/capabilities", timeout=5)}
+            except Exception as exc:
+                result["ui"] = {"adapter": "electron-cdp", "status": "unavailable", "error": str(exc)}
+        return result
 
     @app.get("/api/projects")
     async def projects() -> dict[str, Any]:
@@ -602,6 +620,9 @@ def _snake_project_fields(fields: dict[str, Any]) -> dict[str, Any]:
         "workspacePath": "workspace_path",
         "codexProjectId": "codex_project_id",
         "automationEnabled": "automation_enabled",
+        "agentPlanningEnabled": "agent_planning_enabled",
+        "maxConcurrentTasks": "max_concurrent_tasks",
+        "verificationCommands": "verification_commands",
         "reviewRequired": "review_required",
         "quotaAutoResumeEnabled": "quota_auto_resume_enabled",
     }
@@ -610,7 +631,7 @@ def _snake_project_fields(fields: dict[str, Any]) -> dict[str, Any]:
 
 def _snake_task_fields(fields: dict[str, Any]) -> dict[str, Any]:
     mapping = {"reasoningEffort": "reasoning_effort", "executionMode": "execution_mode", "schedulingMode": "scheduling_mode",
-               "writeScopes": "write_scopes", "targetBranch": "target_branch", "blockedByIds": "blocked_by_ids",
+               "writeScopes": "write_scopes", "sharedResources": "shared_resources", "targetBranch": "target_branch", "blockedByIds": "blocked_by_ids",
                "removeAttachmentIds": "remove_attachment_ids"}
     return {mapping.get(key, key): value for key, value in fields.items()}
 

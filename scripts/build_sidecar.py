@@ -6,12 +6,11 @@ from __future__ import annotations
 import argparse
 import os
 import platform
-import struct
-from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 def native_target() -> str:
@@ -32,7 +31,7 @@ def validate_target(target: str) -> None:
 
 
 def build(*, target: str, skip_copy: bool = False) -> Path:
-    if sys.version_info < (3, 13):
+    if sys.version_info < (3, 13):  # noqa: UP036 - bootstrap must explain an unsupported interpreter
         raise RuntimeError("The sidecar requires Python 3.13 or newer")
     validate_target(target)
     os.environ.setdefault("PYINSTALLER_CONFIG_DIR", str(ROOT / ".build/pyinstaller-config"))

@@ -26,3 +26,5 @@ src-tauri/binaries/*
 .env.*
 !.env.example
 *.log
+
+/diagnostics/

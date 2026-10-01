@@ -7,7 +7,7 @@ import { listModels } from "../api";
 import type { CodexModel, ExecutionOptions, Task } from "../types";
 
 const LABELS: Record<string, string> = { get none() { return t("无"); }, get minimal() { return t("最低"); }, get low() { return t("低"); }, get medium() { return t("中"); }, get high() { return t("高"); }, get xhigh() { return t("很高"); }, get max() { return t("最大"); }, get ultra() { return t("极高"); } };
-type Field = "model" | "reasoningEffort" | "executionMode" | "branch" | "targetBranch" | "writeScopes";
+type Field = "model" | "reasoningEffort" | "executionMode" | "branch" | "targetBranch" | "writeScopes" | "sharedResources";
 
 type Page = Field | "blockedBy";
 type PrimaryField = "model" | "reasoningEffort";
@@ -34,7 +34,7 @@ export function ExecutionSettings({ value, onChange, disabled = false, workspace
   const loaded = useRef(false);
   const options: ExecutionOptions = { model: value.model, reasoningEffort: value.reasoningEffort,
     executionMode: value.executionMode, branch: value.branch, kind: value.kind ?? "task",
-    schedulingMode: value.schedulingMode ?? "exclusive", writeScopes: value.writeScopes ?? [], targetBranch: value.targetBranch ?? null };
+    schedulingMode: value.schedulingMode ?? "exclusive", writeScopes: value.writeScopes ?? [], sharedResources: value.sharedResources ?? [], targetBranch: value.targetBranch ?? null };
   const automaticWorktree = isChild || options.schedulingMode === "parallel" || options.kind === "parallel_group";
   const selected = models.find(model => model.model === value.model);
   useEffect(() => {
@@ -64,6 +64,7 @@ export function ExecutionSettings({ value, onChange, disabled = false, workspace
     { key: "executionMode", label: t("执行位置"), text: automaticWorktree ? t("独立工作树（自动）") : value.executionMode === "worktree" ? t("新工作树") : t("当前项目目录"), changed: !automaticWorktree && value.executionMode === "worktree", locked: workspaceLocked || automaticWorktree, visible: true },
     { key: "branch", label: t("起始分支"), text: isChild ? t("任务组集成版本") : value.branch || (automaticWorktree ? t("合入目标的已提交版本") : t("当前工作区状态")), changed: !!value.branch, locked: workspaceLocked || isChild, visible: value.executionMode === "worktree" || automaticWorktree },
     { key: "targetBranch", label: t("合入目标"), text: value.targetBranch || t("请选择分支"), changed: !!value.targetBranch && value.targetBranch !== defaultTarget, locked: workspaceLocked || isChild, visible: automaticWorktree },
+    { key: "sharedResources", label: t("共享资源"), text: value.sharedResources?.join(", ") || t("未指定"), changed: !!value.sharedResources?.length, locked: workspaceLocked || options.kind === "parallel_group", visible: true },
     { key: "writeScopes", label: t("修改范围"), text: (scopeSummary ?? value.writeScopes)?.length ? (scopeSummary ?? value.writeScopes ?? []).join(", ") : t("未指定"), changed: options.kind !== "parallel_group" && !!value.writeScopes?.length, locked: options.kind === "parallel_group", visible: true },
   ];
   const activeRow = rows.find(row => row.key === page);
@@ -79,6 +80,8 @@ export function ExecutionSettings({ value, onChange, disabled = false, workspace
       onChange({ ...options, model: next, reasoningEffort: model?.defaultReasoningEffort ?? null });
     } else if (field === "executionMode") {
       onChange({ ...options, executionMode: next === "worktree" ? "worktree" : "local", branch: null });
+    } else if (field === "sharedResources") {
+      onChange({ ...options, sharedResources: [...new Set((next || "").split(/\n/).map(path => path.trim()).filter(Boolean))] });
     } else if (field === "writeScopes") {
       onChange({ ...options, writeScopes: [...new Set((next || "").split(/\n/).map(path => path.trim()).filter(Boolean))] });
     } else onChange({ ...options, [field]: next });
@@ -133,7 +136,7 @@ export function ExecutionSettings({ value, onChange, disabled = false, workspace
             {choices.map(choice => <button type="button" key={choice.value} data-popover-item role="option" aria-selected={(options[page] ?? "") === choice.value} disabled={disabled || activeRow?.locked}
               onClick={() => choose(page, choice.value || null)}><span>{choice.label}</span>{(options[page] ?? "") === choice.value && <LinearIcon name="check" />}</button>)}
           </div> : <div className="settings-value-editor">
-            {page === "writeScopes" ? <><textarea aria-label={t("修改范围")} rows={4} value={draft} onChange={event => { setDraft(event.target.value); onChange({ ...options, writeScopes: event.target.value.split("\n").filter(Boolean) }); }} disabled={disabled} placeholder={t("每行一个文件或目录，例如 web/ 或 src/api.py")} /><small>{t("范围重叠的任务会排队；未声明范围的任务仍可能修改这些文件。")}</small></>
+            {page === "sharedResources" ? <><textarea aria-label={t("共享资源")} rows={4} value={draft} onChange={event => { setDraft(event.target.value); onChange({ ...options, sharedResources: event.target.value.split("\n").filter(Boolean) }); }} disabled={disabled} /><small>{t("每行一个共享资源名称，例如 port:3000、browser:main、db:test。")}</small></> : page === "writeScopes" ? <><textarea aria-label={t("修改范围")} rows={4} value={draft} onChange={event => { setDraft(event.target.value); onChange({ ...options, writeScopes: event.target.value.split("\n").filter(Boolean) }); }} disabled={disabled} placeholder={t("每行一个文件或目录，例如 web/ 或 src/api.py")} /><small>{t("范围重叠的任务会排队；未声明范围的任务仍可能修改这些文件。")}</small></>
               : <input aria-label={activeRow?.label} value={draft} onChange={event => { setDraft(event.target.value); onChange({ ...options, [page]: event.target.value || null }); }} disabled={disabled || activeRow?.locked} placeholder={t("输入已有分支名称")} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); choose(page, draft.trim() || null); } }} />}
             <button type="button" className="button primary" disabled={disabled || activeRow?.locked} onClick={() => choose(page, draft.trim() || null)}>{t("应用")}</button>
           </div>)}

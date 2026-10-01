@@ -59,7 +59,7 @@ class FakeAppServer:
     def register_turn_task(self, turn_id: str, task_id: str):
         self.turn_tasks[turn_id] = task_id
 
-    async def start_thread(self, workspace_path: str):
+    async def start_thread(self, workspace_path: str, *, read_only=False):
         self.start_thread_calls.append(workspace_path)
         return f"thread-new-{len(self.start_thread_calls)}"
 
@@ -142,6 +142,7 @@ class SchedulerContractTests(unittest.IsolatedAsyncioTestCase):
         latest = self.server.read_snapshots["thread-1"]["thread"]["turns"][-1]
         latest["status"] = "completed"
         latest["items"][1].update(status="completed", aggregatedOutput="/tmp/project")
+        self.scheduler._dirty_threads.add("thread-1")  # Terminal event invalidates the history cache.
         await self.scheduler._sync_threads()
         self.assertEqual(self.db.get_task(task["id"])["status"], "done")
         self.assertEqual(self.db.list_activity(task["id"])[1]["data"]["aggregatedOutput"], "/tmp/project")

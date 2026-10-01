@@ -1,5 +1,20 @@
 // Chinese source strings are stable message keys; placeholders are positional.
 export const en = {
+  "验收记录": "Verification records",
+  "共享资源": "Shared resources",
+  "每行一个共享资源名称，例如 port:3000、browser:main、db:test。": "One shared resource per line, e.g. port:3000, browser:main, db:test.",
+  "并发与验收": "Concurrency and verification",
+  "并发上限（0 为不限）": "Concurrent tasks (0 = unlimited)",
+  "保存并发上限": "Save concurrency limit",
+  "验收命令（JSON 参数数组，在合并候选提交上执行）": "Verification commands (JSON argv arrays, run on the merge candidate)",
+  "每条命令必须为非空参数数组": "Each command must be a nonempty argv array",
+  "保存验收命令": "Save verification commands",
+  "Agent 辅助规划": "Agent-assisted planning",
+  "只读分析生成草案，确认后使用同一调度器；关闭不停止运行任务。": "Analyze read-only and confirm a draft. Turning this off does not stop running tasks.",
+  "项目设置已保存": "Project settings saved",
+  "并行理由": "Parallelism rationale",
+  "验收条件": "Acceptance criteria",
+
   "展开计划": "Expand plan",
   "收起计划": "Collapse plan",
   "发送": "Send",
