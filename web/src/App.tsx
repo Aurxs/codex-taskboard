@@ -139,12 +139,30 @@ function Switch({ checked, label, description, onChange }: { checked: boolean; l
   );
 }
 
+
+function ExecutionPolicy({ project, onChange }: { project: Project; onChange: (field: "maxConcurrentTasks" | "verificationCommands", value: number | string[][]) => void }) {
+  const [budget, setBudget] = useState(String(project.maxConcurrentTasks));
+  const [commands, setCommands] = useState(JSON.stringify(project.verificationCommands, null, 2));
+  const [error, setError] = useState("");
+  return <details><summary>{t("并发与验收")}</summary>
+    <label>{t("并发上限（0 为不限）")}<input type="number" min="0" max="64" value={budget} onChange={e => setBudget(e.target.value)} /></label>
+    <button type="button" disabled={!/^\d+$/.test(budget) || Number(budget) > 64} onClick={() => onChange("maxConcurrentTasks", Number(budget))}>{t("保存并发上限")}</button>
+    <label>{t("验收命令（JSON 参数数组，在合并候选提交上执行）")}<textarea rows={5} value={commands} onChange={e => setCommands(e.target.value)} placeholder={'[["npm", "test"]]'} /></label>
+    <button type="button" onClick={() => { try {
+      const value: unknown = JSON.parse(commands);
+      if (!Array.isArray(value) || !value.every(row => Array.isArray(row) && row.length && row.every(arg => typeof arg === "string" && arg.length))) throw new Error(t("每条命令必须为非空参数数组"));
+      setError(""); onChange("verificationCommands", value as string[][]);
+    } catch (e) { setError(String(e)); } }}>{t("保存验收命令")}</button>
+    {error && <p role="alert">{error}</p>}
+  </details>;
+}
+
 function ProjectSettingsMenu({
   project,
   onChange,
 }: {
   project: Project;
-  onChange: (field: "automationEnabled" | "reviewRequired" | "quotaAutoResumeEnabled", value: boolean) => void;
+  onChange: (field: "automationEnabled" | "reviewRequired" | "quotaAutoResumeEnabled" | "agentPlanningEnabled" | "maxConcurrentTasks" | "verificationCommands", value: boolean | number | string[][]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -168,6 +186,8 @@ function ProjectSettingsMenu({
       {open && (
         <div className="project-automation-menu no-drag" role="dialog" aria-label={t("自动认领设置")}>
           <div className="project-automation-menu-heading"><strong>{t("自动认领待办")}</strong><span className={project.automationEnabled ? "is-active" : "is-paused"}>{project.automationEnabled ? t("运行中") : t("已暂停")}</span></div>
+          <Switch checked={project.agentPlanningEnabled} label={t("Agent 辅助规划")} description={t("只读分析生成草案，确认后使用同一调度器；关闭不停止运行任务。")} onChange={value => onChange("agentPlanningEnabled", value)} />
+          <ExecutionPolicy project={project} onChange={onChange} />
           <Switch checked={project.automationEnabled} label={t("自动认领开关")} description={t("就绪后自动执行")} onChange={(value) => onChange("automationEnabled", value)} />
           <Switch checked={project.reviewRequired} label={t("人工审阅")} description={t("完成后等你确认")} onChange={(value) => onChange("reviewRequired", value)} />
           <Switch checked={project.quotaAutoResumeEnabled} label={t("额度恢复自动续跑")} description={t("额度恢复后继续原 thread")} onChange={(value) => onChange("quotaAutoResumeEnabled", value)} />
@@ -444,12 +464,12 @@ function EmbeddedTaskboard() {
     }
   }, [notify, refreshTasks, updateTaskInState]);
 
-  const updateProjectSetting = useCallback(async (field: "automationEnabled" | "reviewRequired" | "quotaAutoResumeEnabled", value: boolean) => {
+  const updateProjectSetting = useCallback(async (field: "automationEnabled" | "reviewRequired" | "quotaAutoResumeEnabled" | "agentPlanningEnabled" | "maxConcurrentTasks" | "verificationCommands", value: boolean | number | string[][]) => {
     if (!selectedProject) return;
     try {
       const next = await updateProject(selectedProject.id, selectedProject.version, { [field]: value });
       setProjects((current) => current.map((project) => project.id === next.id ? next : project));
-      notify(value ? t("{0}已开启", field === "automationEnabled" ? t("自动认领") : field === "reviewRequired" ? t("人工审阅") : t("额度恢复自动续跑")) : t("{0}已关闭", field === "automationEnabled" ? t("自动认领") : field === "reviewRequired" ? t("人工审阅") : t("额度恢复自动续跑")), "success");
+      notify(t("项目设置已保存"), "success");
     } catch (error) {
       notify(compactError(error), "error");
     }
@@ -545,7 +565,7 @@ function EmbeddedTaskboard() {
 
         {!selectedTask && selectedProject && <BoardToolbar search={search} onSearch={setSearch} columns={columns} onColumnsChange={changeColumns} />}
         {syncError && <ErrorBanner message={syncError} onRetry={() => setSyncAttempt(value => value + 1)} />}
-        {!hostContext || loading || projects.length === 0 || !selectedProject ? <HostWaitingMessage hasProjects={Boolean(hostContext?.projects?.length)} /> : selectedTask ? <TaskDetail key={selectedTask.id} task={selectedTask} tasks={tasks.filter((task) => task.status !== "canceled")} onBack={() => { if (selectedTask.parentId) { setSelectedTaskId(selectedTask.parentId); void getTask(selectedTask.parentId).then(setDetail).catch(error => notify(compactError(error), "error")); } else { setSelectedTaskId(null); setDetail(null); } }} onOpenTask={task => { setSelectedTaskId(task.id); setDetail(task); void getTask(task.id).then(setDetail).catch(error => notify(compactError(error), "error")); }} onUpdate={updateTaskResource} onDependencies={updateDependencies} onAction={performAction} onResolveInteraction={resolveTaskInteraction} /> : (
+        {!hostContext || loading || projects.length === 0 || !selectedProject ? <HostWaitingMessage hasProjects={Boolean(hostContext?.projects?.length)} /> : selectedTask ? <TaskDetail agentPlanningEnabled={selectedProject.agentPlanningEnabled} key={selectedTask.id} task={selectedTask} tasks={tasks.filter((task) => task.status !== "canceled")} onBack={() => { if (selectedTask.parentId) { setSelectedTaskId(selectedTask.parentId); void getTask(selectedTask.parentId).then(setDetail).catch(error => notify(compactError(error), "error")); } else { setSelectedTaskId(null); setDetail(null); } }} onOpenTask={task => { setSelectedTaskId(task.id); setDetail(task); void getTask(task.id).then(setDetail).catch(error => notify(compactError(error), "error")); }} onUpdate={updateTaskResource} onDependencies={updateDependencies} onAction={performAction} onResolveInteraction={resolveTaskInteraction} /> : (
           <div className="issue-board-layout" data-main-columns={columns.length}>
             <div className="board-scroll" aria-label={t("议题看板")}>
               <div className="board">

@@ -27,7 +27,7 @@ from .platforms import attachment_filename
 from .errors import ConflictError, NotFoundError, ValidationError
 from .parallel_db import ParallelDatabase
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 _UNSET = object()
 _KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 _KEY_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_-]+")
@@ -264,6 +264,20 @@ class Database(ParallelDatabase):
                 self.migrate_parallel()
                 self._conn.execute("UPDATE schema_meta SET version = 8 WHERE singleton = 1")
             current = 8
+        if current < 9:
+            with self.transaction(immediate=True):
+                columns = {r["name"] for r in self._conn.execute("PRAGMA table_info(projects)")}
+                for name, definition in (("agent_planning_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                                         ("max_concurrent_tasks", "INTEGER NOT NULL DEFAULT 0"),
+                                         ("verification_commands", "TEXT NOT NULL DEFAULT '[]'")):
+                    if name not in columns:
+                        self._conn.execute(f"ALTER TABLE projects ADD COLUMN {name} {definition}")
+                task_columns = {r["name"] for r in self._conn.execute("PRAGMA table_info(tasks)")}
+                if "shared_resources" not in task_columns:
+                    self._conn.execute("ALTER TABLE tasks ADD COLUMN shared_resources TEXT NOT NULL DEFAULT '[]'")
+                self._conn.execute("CREATE TABLE IF NOT EXISTS resource_leases (resource TEXT NOT NULL, namespace TEXT NOT NULL, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, PRIMARY KEY(resource, namespace))")
+                self._conn.execute("UPDATE schema_meta SET version = 9 WHERE singleton = 1")
+            current = 9
         if current != SCHEMA_VERSION:
             raise RuntimeError(f"No migration path from schema {current}")
 
@@ -279,6 +293,9 @@ class Database(ParallelDatabase):
             "workspacePath": row["workspace_path"],
             "codexProjectId": row["codex_project_id"],
             "automationEnabled": bool(row["automation_enabled"]),
+            "agentPlanningEnabled": bool(row["agent_planning_enabled"]),
+            "maxConcurrentTasks": int(row["max_concurrent_tasks"]),
+            "verificationCommands": json.loads(row["verification_commands"]),
             "reviewRequired": bool(row["review_required"]),
             "quotaAutoResumeEnabled": bool(row["quota_auto_resume_enabled"]),
             "version": int(row["version"]),
@@ -581,6 +598,9 @@ class Database(ParallelDatabase):
         automation_enabled: bool | object = _UNSET,
         review_required: bool | object = _UNSET,
         quota_auto_resume_enabled: bool | object = _UNSET,
+        agent_planning_enabled: bool | object = _UNSET,
+        max_concurrent_tasks: int | object = _UNSET,
+        verification_commands: list | object = _UNSET,
     ) -> dict[str, Any]:
         values: dict[str, Any] = {}
         if key is not _UNSET:
@@ -611,6 +631,17 @@ class Database(ParallelDatabase):
             values["review_required"] = int(bool(review_required))
         if quota_auto_resume_enabled is not _UNSET:
             values["quota_auto_resume_enabled"] = int(bool(quota_auto_resume_enabled))
+        if agent_planning_enabled is not _UNSET:
+            if not isinstance(agent_planning_enabled, bool):
+                raise ValidationError("agentPlanningEnabled must be boolean")
+            values["agent_planning_enabled"] = int(agent_planning_enabled)
+        if max_concurrent_tasks is not _UNSET:
+            if type(max_concurrent_tasks) is not int or not 0 <= max_concurrent_tasks <= 64:
+                raise ValidationError("maxConcurrentTasks must be an integer from 0 to 64")
+            values["max_concurrent_tasks"] = max_concurrent_tasks
+        if verification_commands is not _UNSET:
+            from .verification import validate_commands
+            values["verification_commands"] = _json(validate_commands(verification_commands))
         if not values:
             return self.get_project(project_id)
         values["updated_at"] = utc_now()
@@ -733,6 +764,7 @@ class Database(ParallelDatabase):
         parent_id: str | None = None,
         scheduling_mode: str = "exclusive",
         write_scopes: list[str] | None = None,
+        shared_resources: list[str] | None = None,
         target_branch: str | None = None,
         blocked_by_ids: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -771,7 +803,7 @@ class Database(ParallelDatabase):
             )
             parallel_values = self.validate_parallel_options(self.get_task(task_id), {
                 "kind": kind, "parent_id": parent_id, "scheduling_mode": scheduling_mode,
-                "write_scopes": write_scopes or [], "target_branch": target_branch,
+                "write_scopes": write_scopes or [], "shared_resources": shared_resources or [], "target_branch": target_branch,
             }, creating=True)
             state = {"managed": bool(scheduling_mode == "parallel" or parent_id or kind == "parallel_group"),
                      "mergeState": "none"}
@@ -877,12 +909,13 @@ class Database(ParallelDatabase):
         kind: str | object = _UNSET,
         scheduling_mode: str | object = _UNSET,
         write_scopes: list[str] | object = _UNSET,
+        shared_resources: list[str] | object = _UNSET,
         target_branch: str | None | object = _UNSET,
         parallel: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         values: dict[str, Any] = {}
         config = {k: v for k, v in (("kind", kind), ("scheduling_mode", scheduling_mode),
-                                   ("write_scopes", write_scopes), ("target_branch", target_branch)) if v is not _UNSET}
+                                   ("write_scopes", write_scopes), ("shared_resources", shared_resources), ("target_branch", target_branch)) if v is not _UNSET}
         if config:
             current = self.get_task(task_id)
             values.update(self.validate_parallel_options(current, config))

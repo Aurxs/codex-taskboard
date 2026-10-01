@@ -38,7 +38,7 @@ export function TaskEditor({
   const requestId = useRef(crypto.randomUUID());
   const [priority, setPriority] = useState<TaskPriority>(task?.priority ?? "none");
   const [blockedByIds, setBlockedByIds] = useState<string[]>(task?.blockedBy.map((item) => item.id) ?? []);
-  const [execution, setExecution] = useState<ExecutionOptions>({ model: task?.model ?? null, reasoningEffort: task?.reasoningEffort ?? null, executionMode: task?.executionMode ?? "local", branch: task?.branch ?? null, kind: task?.kind ?? "task", schedulingMode: task?.schedulingMode ?? (parent ? "parallel" : "exclusive"), writeScopes: task?.writeScopes ?? [], targetBranch: task?.targetBranch ?? parent?.targetBranch ?? null });
+  const [execution, setExecution] = useState<ExecutionOptions>({ model: task?.model ?? null, reasoningEffort: task?.reasoningEffort ?? null, executionMode: task?.executionMode ?? "local", branch: task?.branch ?? null, kind: task?.kind ?? "task", schedulingMode: task?.schedulingMode ?? (parent ? "parallel" : "exclusive"), writeScopes: task?.writeScopes ?? [], sharedResources: task?.sharedResources ?? [], targetBranch: task?.targetBranch ?? parent?.targetBranch ?? null });
   const [defaultTarget, setDefaultTarget] = useState<string | null>(task?.parallel?.defaultTarget as string ?? parent?.targetBranch ?? null);
   useEffect(() => {
     if (!projectId || task || parent) return;

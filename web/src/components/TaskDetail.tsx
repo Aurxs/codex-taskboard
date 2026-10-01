@@ -88,6 +88,7 @@ function InteractionRow({ interaction, onResolve }: { interaction: Interaction; 
 }
 
 export function TaskDetail({
+  agentPlanningEnabled,
   task,
   tasks,
   onBack,
@@ -97,11 +98,12 @@ export function TaskDetail({
   onResolveInteraction,
   onOpenTask,
 }: {
+  agentPlanningEnabled: boolean;
   onOpenTask: (task: Task) => void;
   task: Task;
   tasks: Task[];
   onBack: () => void;
-  onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[]; removeAttachmentIds?: string[] })) => Promise<Task | null>;
+  onUpdate: (task: Task, changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "sharedResources" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[]; removeAttachmentIds?: string[] })) => Promise<Task | null>;
   onDependencies: (task: Task, ids: string[]) => Promise<Task | null>;
   onAction: (task: Task, action: TaskAction, feedback?: string, targetStatus?: "in_review" | "done", attachmentIds?: string[]) => Promise<Task | null>;
   onResolveInteraction: (interaction: Interaction, response: unknown) => Promise<void>;
@@ -209,7 +211,7 @@ export function TaskDetail({
 
   const pendingInteractions = useMemo(() => (current.interactions ?? []).filter((interaction) => interaction.status === "pending"), [current.interactions]);
   const planInteractions = planning ? pendingInteractions.filter(i => i.payload?.threadId === current.plan?.threadId) : [];
-  async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[]; removeAttachmentIds?: string[] })) {
+  async function save(changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "sharedResources" | "targetBranch">> & { attachments?: import("../types").AttachmentInput[]; removeAttachmentIds?: string[] })) {
     setSaving(true);
     try {
       const next = await onUpdate(current, changes);
@@ -262,7 +264,7 @@ export function TaskDetail({
                 {attachmentError && <p className="form-error" role="alert">{localizeError(attachmentError)}</p>}
               </div>
             </div>
-            {isGroup && <GroupTasks group={current} onRefresh={refreshCurrent} onOpen={onOpenTask} />}
+            {isGroup && <GroupTasks agentPlanningEnabled={agentPlanningEnabled} group={current} onRefresh={refreshCurrent} onOpen={onOpenTask} />}
             {(current.waitReason || paused || current.parallel?.needsValidation) && <p className="task-wait-reason" role="status">{current.waitReason ? localizeError(current.waitReason) : current.parallel?.needsValidation ? t("前置成果已修改，需要重新验证") : t("已暂停")}</p>}
             {managed && current.mergeState && current.mergeState !== "none" && <p className="task-merge-state">{t("合入状态")} · {current.mergeState === "pending_review" ? t("等待审阅") : current.mergeState === "queued" ? t("等待合入") : current.mergeState === "merging" ? t("合入中") : current.mergeState === "merged" ? t("已合入") : t("需要处理")}</p>}
             <section className="activity-section">
@@ -316,6 +318,12 @@ export function TaskDetail({
             <ExecutionSettings key={current.id} defaultTarget={current.parallel?.defaultTarget as string ?? null} scopeSummary={isGroup ? [...new Set(current.children?.flatMap(child => child.writeScopes ?? []) ?? [])] : undefined} value={current} isChild={!!current.parentId} workspaceLocked={!!current.threadId || !!current.worktreePath || !!current.parallel?.baseCommit} disabled={saving || (current.status === "in_progress" && !paused)} onChange={async changes => !!await save(changes)} />
             {current.status === "in_progress" && !paused && <small className="settings-note">{t("暂停任务后可修改；下次执行生效。")}</small>}
             {current.worktreePath && <small className="task-worktree-path">{current.worktreePath}</small>}
+            {managed && <details className="merge-history"><summary>{t("验收记录")}</summary>
+              {(current.operations ?? []).filter(op => op.kind === "verification").slice().reverse().map(op => <div key={op.id}>
+                <strong>{op.state}</strong><code>{String(op.payload.candidateCommit ?? "")}</code>
+                <pre>{JSON.stringify(op.payload.records ?? [], null, 2)}</pre>
+              </div>)}
+            </details>}
             {managed && <details className="merge-history"><summary>{t("合入记录")} · {(current.operations ?? []).filter(op => op.kind === "merge").length}</summary>
               <p>{t("合入目标")} <code>{current.targetBranch ?? "—"}</code></p>
               {typeof current.parallel?.baseCommit === "string" && <p>{t("起始提交")} <code title={current.parallel.baseCommit}>{current.parallel.baseCommit.slice(0, 12)}</code></p>}

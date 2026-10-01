@@ -666,7 +666,9 @@ class CdpInjector:
         if connection is None:
             raise InjectorError("Codex 桌面尚未连接，请稍后重试")
         request_id = f"taskboard-{secrets.token_hex(16)}"
-        if method is None:
+        if method == "desktop/capabilities":
+            expression = "({result: {sendMessage: typeof window.electronBridge?.sendMessageFromView === 'function', sidebarBootstrap: typeof window.electronBridge?.getInitialSidebarBootstrap === 'function', privateWorktreeRoutes: 'unverified'}})"
+        elif method is None:
             expression = f"window.electronBridge.sendMessageFromView({json.dumps({'type': 'mcp-response', 'hostId': 'local', 'response': params})})"
         elif method in {"desktop/worktree-create-managed", "desktop/worktree-set-owner-thread"}:
             message = {"type": "fetch", "requestId": request_id, "method": "POST",
@@ -707,6 +709,8 @@ class CdpInjector:
               try {{ (async () => {{ {browser_route} await window.electronBridge.sendMessageFromView({json.dumps(message)}); }})().catch(error => finish({{error: {{message: String(error)}}}})); }}
               catch (error) {{ finish({{error: {{message: String(error)}}}}); }}
             }})"""
+        if method != "desktop/capabilities":
+            expression = "(async () => { if (typeof window.electronBridge?.sendMessageFromView !== 'function') return {error: {code: 'HOST_CAPABILITY_MISSING', message: 'Codex desktop message bridge is unavailable in this renderer'}}; return await (" + expression + "); })()"
         result = connection.request("Runtime.evaluate", {"expression": expression, "awaitPromise": True, "returnByValue": True}, timeout=timeout + 2)
         if result.get("exceptionDetails"):
             raise InjectorError("Codex 桌面消息通道不可用")

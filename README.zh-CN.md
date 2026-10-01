@@ -11,6 +11,9 @@
   <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
+> 十月兼容升级：[版本证据、侧栏入口修复、可选规划与验收配置](docs/compatibility-2026-10.md)。托管合并需要配置验收命令，Agent 辅助规划默认关闭。
+
+
 Codex Taskboard 是一个运行在 Codex 内部的本地任务看板：整理需求、设置前置依赖，再交给 Codex 执行。菜单栏启动器负责启动服务和挂载面板，任务、执行记录与项目设置保存在本机 SQLite 数据库中。
 
 这是一个独立社区项目，与 OpenAI 无隶属或背书关系。

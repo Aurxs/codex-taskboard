@@ -7,7 +7,7 @@ import { listModels } from "../api";
 import type { CodexModel, ExecutionOptions } from "../types";
 
 const LABELS: Record<string, string> = { get none() { return t("无"); }, get minimal() { return t("最低"); }, get low() { return t("低"); }, get medium() { return t("中"); }, get high() { return t("高"); }, get xhigh() { return t("很高"); }, get max() { return t("最大"); }, get ultra() { return t("极高"); } };
-type Field = "schedulingMode" | "model" | "reasoningEffort" | "executionMode" | "branch" | "targetBranch" | "writeScopes";
+type Field = "schedulingMode" | "model" | "reasoningEffort" | "executionMode" | "branch" | "targetBranch" | "writeScopes" | "sharedResources";
 
 /** Commit one property at a time; only server-confirmed values appear in the sidebar. */
 export function DetailExecutionSettings({ value, onChange, disabled = false, workspaceLocked = false, isChild = false, defaultTarget = null, scopeSummary }: {
@@ -45,6 +45,7 @@ export function DetailExecutionSettings({ value, onChange, disabled = false, wor
     { key: "executionMode", label: t("执行位置"), text: automaticWorktree ? t("独立工作树（自动）") : value.executionMode === "worktree" ? t("新工作树") : t("当前项目目录"), changed: !automaticWorktree && value.executionMode === "worktree", locked: workspaceLocked || automaticWorktree, visible: true },
     { key: "branch", label: t("起始分支"), text: isChild ? t("任务组集成版本") : value.branch || (automaticWorktree ? t("合入目标的已提交版本") : t("当前工作区状态")), changed: !!value.branch, locked: workspaceLocked || isChild, visible: value.executionMode === "worktree" || automaticWorktree },
     { key: "targetBranch", label: t("合入目标"), text: value.targetBranch || t("请选择分支"), changed: !!value.targetBranch && value.targetBranch !== defaultTarget, locked: workspaceLocked || isChild, visible: automaticWorktree },
+    { key: "sharedResources", label: t("共享资源"), text: value.sharedResources?.join(", ") || t("未指定"), changed: !!value.sharedResources?.length, locked: value.kind === "parallel_group", visible: true },
     { key: "writeScopes", label: t("修改范围"), text: (scopeSummary ?? value.writeScopes)?.length ? (scopeSummary ?? value.writeScopes ?? []).join(", ") : t("未指定"), changed: value.kind !== "parallel_group" && !!value.writeScopes?.length, locked: value.kind === "parallel_group", visible: true },
   ];
   const activeRow = rows.find(row => row.key === page);
@@ -70,6 +71,8 @@ export function DetailExecutionSettings({ value, onChange, disabled = false, wor
       changes = { executionMode: next === "worktree" ? "worktree" : "local", branch: null };
     } else if (field === "schedulingMode") {
       changes = { schedulingMode: next === "parallel" ? "parallel" : "exclusive" };
+    } else if (field === "sharedResources") {
+      changes = { sharedResources: [...new Set((next || "").split(/\n/).map(path => path.trim()).filter(Boolean))] };
     } else if (field === "writeScopes") {
       changes = { writeScopes: [...new Set((next || "").split(/\n/).map(path => path.trim()).filter(Boolean))] };
     } else changes = { [field]: next };
@@ -104,7 +107,7 @@ export function DetailExecutionSettings({ value, onChange, disabled = false, wor
           {choices.map(choice => <button type="button" key={choice.value} data-popover-item role="option" aria-selected={selectedValue === choice.value} disabled={blocked}
             onClick={() => void choose(page, choice.value || null)}><span>{choice.label}</span>{selectedValue === choice.value && <LinearIcon name="check" />}</button>)}
         </div> : <form className="settings-value-editor" onSubmit={event => { event.preventDefault(); void choose(page, draft.trim() || null); }}>
-          {page === "writeScopes" ? <><textarea aria-label={t("修改范围")} rows={4} value={draft} onChange={event => setDraft(event.target.value)} disabled={blocked} placeholder={t("每行一个文件或目录，例如 web/ 或 src/api.py")} /><small>{t("范围重叠的任务会排队；未声明范围的任务仍可能修改这些文件。")}</small></>
+          {page === "sharedResources" ? <><textarea aria-label={t("共享资源")} rows={4} value={draft} onChange={event => setDraft(event.target.value)} disabled={blocked} /><small>{t("每行一个共享资源名称，例如 port:3000、browser:main、db:test。")}</small></> : page === "writeScopes" ? <><textarea aria-label={t("修改范围")} rows={4} value={draft} onChange={event => setDraft(event.target.value)} disabled={blocked} placeholder={t("每行一个文件或目录，例如 web/ 或 src/api.py")} /><small>{t("范围重叠的任务会排队；未声明范围的任务仍可能修改这些文件。")}</small></>
             : <input aria-label={activeRow?.label} value={draft} onChange={event => setDraft(event.target.value)} disabled={blocked} placeholder={t("输入已有分支名称")} onKeyDown={event => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); }} />}
           <button type="submit" className="button primary" disabled={blocked}>{saving ? t("正在保存…") : t("应用")}</button>
         </form>}

@@ -35,6 +35,9 @@ export interface Project {
   workspacePath: string;
   codexProjectId: string | null;
   automationEnabled: boolean;
+  agentPlanningEnabled: boolean;
+  maxConcurrentTasks: number;
+  verificationCommands: string[][];
   reviewRequired: boolean;
   quotaAutoResumeEnabled: boolean;
   version: number;
@@ -85,6 +88,7 @@ export interface ExecutionOptions {
   kind?: "task" | "parallel_group";
   schedulingMode?: "exclusive" | "parallel";
   writeScopes?: string[];
+  sharedResources?: string[];
   targetBranch?: string | null;
 }
 
@@ -95,7 +99,7 @@ export interface TaskOperation {
   payload: { threadId?: string; error?: unknown; proposal?: { tasks: ProposedTask[] }; [key: string]: unknown };
 }
 
-export interface ProposedTask { key: string; title: string; description: string; blockedByKeys: string[]; writeScopes: string[] }
+export interface ProposedTask { parallelReason?: string; acceptanceCriteria?: string; key: string; title: string; description: string; blockedByKeys: string[]; writeScopes: string[] }
 
 export interface CodexModel {
   model: string;

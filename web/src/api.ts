@@ -118,6 +118,7 @@ function normalizeTask(value: unknown): Task {
     schedulingMode: item.schedulingMode === "parallel" ? "parallel" : "exclusive",
     parentId: item.parentId == null ? null : String(item.parentId),
     writeScopes: Array.isArray(item.writeScopes) ? item.writeScopes as string[] : [],
+    sharedResources: Array.isArray(item.sharedResources) ? item.sharedResources as string[] : [],
     targetBranch: item.targetBranch == null ? null : String(item.targetBranch),
     groupPhase: item.groupPhase as Task["groupPhase"],
     mergeState: (item.mergeState ?? "none") as Task["mergeState"],
@@ -163,6 +164,9 @@ function normalizeProject(value: unknown): Project {
     workspacePath: String(item.workspacePath ?? item.path ?? ""),
     codexProjectId: item.codexProjectId == null ? null : String(item.codexProjectId),
     automationEnabled: Boolean(item.automationEnabled ?? false),
+    agentPlanningEnabled: Boolean(item.agentPlanningEnabled),
+    maxConcurrentTasks: Number(item.maxConcurrentTasks ?? 0),
+    verificationCommands: Array.isArray(item.verificationCommands) ? item.verificationCommands as string[][] : [],
     reviewRequired: item.reviewRequired !== false,
     quotaAutoResumeEnabled: item.quotaAutoResumeEnabled !== false,
     version: Number(item.version ?? 0),
@@ -216,7 +220,7 @@ export async function createProject(input: {
 export async function updateProject(
   id: string,
   version: number,
-  changes: Partial<Pick<Project, "key" | "name" | "workspacePath" | "automationEnabled" | "reviewRequired" | "quotaAutoResumeEnabled">>,
+  changes: Partial<Pick<Project, "key" | "name" | "workspacePath" | "automationEnabled" | "reviewRequired" | "quotaAutoResumeEnabled" | "agentPlanningEnabled" | "maxConcurrentTasks" | "verificationCommands">>,
 ): Promise<Project> {
   return normalizeProject(await request<unknown>(`/api/projects/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -243,7 +247,7 @@ export async function getTask(id: string): Promise<Task> {
 
 export async function createTask(
   projectId: string,
-  input: { title: string; description: string; priority: TaskPriority; blockedByIds?: string[]; attachments?: AttachmentInput[]; model?: string | null; reasoningEffort?: string | null; executionMode?: "local" | "worktree"; branch?: string | null; kind?: "task" | "parallel_group"; schedulingMode?: "exclusive" | "parallel"; writeScopes?: string[]; targetBranch?: string | null; requestId?: string },
+  input: { title: string; description: string; priority: TaskPriority; blockedByIds?: string[]; attachments?: AttachmentInput[]; model?: string | null; reasoningEffort?: string | null; executionMode?: "local" | "worktree"; branch?: string | null; kind?: "task" | "parallel_group"; schedulingMode?: "exclusive" | "parallel"; writeScopes?: string[]; sharedResources?: string[]; targetBranch?: string | null; requestId?: string },
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/projects/${encodeURIComponent(projectId)}/tasks`, {
     method: "POST",
@@ -254,7 +258,7 @@ export async function createTask(
 export async function updateTask(
   id: string,
   version: number,
-  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "targetBranch">> & { attachments?: import("./types").AttachmentInput[]; removeAttachmentIds?: string[] }),
+  changes: (Partial<Pick<Task, "title" | "description" | "priority" | "model" | "reasoningEffort" | "executionMode" | "branch" | "kind" | "schedulingMode" | "writeScopes" | "sharedResources" | "targetBranch">> & { attachments?: import("./types").AttachmentInput[]; removeAttachmentIds?: string[] }),
 ): Promise<Task> {
   return normalizeTask(await request<unknown>(`/api/tasks/${encodeURIComponent(id)}`, {
     method: "PATCH",

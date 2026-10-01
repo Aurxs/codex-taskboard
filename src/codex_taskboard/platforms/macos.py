@@ -132,7 +132,10 @@ def pick_directory(prompt: str) -> subprocess.CompletedProcess:
 def bundled_agent() -> str | None:
     app = discover_app()
     if app:
-        candidate = app / "Contents/Resources/codex"
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate)
+        # ChatGPT 26.928 bundles a versioned CLI package; older Codex builds
+        # place the executable directly in Resources. Prefer the selected host.
+        for relative in ("codex-cli/bin/codex", "codex"):
+            candidate = app / "Contents/Resources" / relative
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
     return None

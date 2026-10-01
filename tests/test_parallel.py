@@ -29,6 +29,8 @@ class ParallelTests(unittest.IsolatedAsyncioTestCase):
         git.git(str(self.root), "commit", "-m", "base")
         self.db = Database(Path(self.temp.name) / "board.db")
         self.project = self.db.create_project(key="TEST", name="Test", workspace_path=str(self.root), automation_enabled=True)
+        self.project = self.db.update_project(self.project["id"], self.project["version"],
+            agent_planning_enabled=True, verification_commands=[["git", "diff", "--check", "HEAD^", "HEAD"]])
         with patch("codex_taskboard.scheduler.CodexAppServer", FakeAppServer):
             self.scheduler = Scheduler(self.db, EventBus(), codex_command=["fake"])
         self.runtime = self.scheduler.parallel
@@ -72,6 +74,87 @@ class ParallelTests(unittest.IsolatedAsyncioTestCase):
             await self.runtime.action(task, "complete")
         await self.runtime.merge_task(task["id"])
         return self.db.get_task(task["id"])
+
+    async def test_verification_failure_blocks_publication_and_records_candidate(self):
+        import sys
+        project = self.db.get_project(self.project["id"])
+        self.db.update_project(project["id"], project["version"], verification_commands=[
+            [sys.executable, "-c", "from pathlib import Path; assert Path('result.txt').exists(); print('candidate checked'); raise SystemExit(9)"]])
+        base = git.commit(str(self.root))
+        task = await self.approve_merge(await self.result(self.task()))
+        self.assertEqual(task["mergeState"], "blocked")
+        self.assertEqual(git.commit(str(self.root)), base)
+        evidence = self.db.operations(task["id"], "verification")[0]
+        self.assertEqual(evidence["state"], "failed")
+        self.assertEqual(evidence["payload"]["records"][0]["exitCode"], 9)
+        self.assertIn("candidate checked", evidence["payload"]["records"][0]["log"])
+        self.assertNotEqual(evidence["payload"]["candidateCommit"], evidence["payload"]["sourceCommit"])
+        project = self.db.get_project(project["id"])
+        self.db.update_project(project["id"], project["version"], verification_commands=[
+            [sys.executable, "-c", "from pathlib import Path; assert Path('result.txt').exists()"]])
+        await self.runtime.action(task, "merge_retry")
+        await self.runtime.merge_task(task["id"])
+        self.assertEqual(self.db.get_task(task["id"])["status"], "done")
+        self.assertEqual(len(self.db.operations(task["id"], "verification")), 2)
+
+    async def test_policy_change_during_verification_cannot_publish(self):
+        from codex_taskboard.verification import run_commands
+        task = await self.result(self.task())
+        base = git.commit(str(self.root))
+        def change_policy(root, commands):
+            records = run_commands(root, commands)
+            project = self.db.get_project(self.project["id"])
+            self.db.update_project(project["id"], project["version"], verification_commands=[])
+            return records
+        with patch("codex_taskboard.verification.run_commands", side_effect=change_policy):
+            task = await self.approve_merge(task)
+        self.assertEqual(task["mergeState"], "blocked")
+        self.assertEqual(git.commit(str(self.root)), base)
+
+    async def test_shared_resource_is_global_and_retained_until_release(self):
+        first = self.task("browser user", shared_resources=["browser:main", "port:3000"])
+        second = self.task("browser waiter", shared_resources=["browser:main"])
+        independent = self.task("independent", shared_resources=["db:test"])
+        self.assertIsNotNone(self.db.claim_candidate(first["id"]))
+        self.assertIsNone(self.db.claim_candidate(second["id"]))
+        self.assertIn("browser:main", self.db.get_task(second["id"])["waitReason"])
+        self.assertIsNotNone(self.db.claim_candidate(independent["id"]))
+        self.db.release_execution(first["id"])
+        self.assertIsNone(self.db.claim_candidate(second["id"]))
+        self.db.release_execution(first["id"], scopes=True)
+        self.assertIsNotNone(self.db.claim_candidate(second["id"]))
+
+    async def test_budget_and_unknown_leases_survive_database_restart(self):
+        project = self.db.get_project(self.project["id"])
+        self.db.update_project(project["id"], project["version"], max_concurrent_tasks=1)
+        first, second = self.task("first"), self.task("second")
+        self.assertIsNotNone(self.db.claim_candidate(first["id"]))
+        path = self.db.path
+        self.db.close()
+        self.db = Database(path)
+        self.scheduler.db = self.runtime.db = self.db
+        self.assertIsNone(self.db.claim_candidate(second["id"]))
+        self.assertIn("并发预算", self.db.get_task(second["id"])["waitReason"])
+        self.db.release_execution(first["id"])
+        # Running legacy states still preserve exclusivity; parallel claims fit budget.
+        self.assertIsNotNone(self.db.claim_candidate(second["id"]))
+
+    async def test_planner_toggle_and_stale_baseline_never_modify_graph(self):
+        group = self.db.create_task(project_id=self.project["id"], title="Group", kind="parallel_group")
+        self.db.save_operation("stale", group["id"], "plan", "ready", context=self.runtime.plan_context(group))
+        proposal = {"tasks": [{"key": "a", "title": "A", "parallelReason": "Independent", "acceptanceCriteria": "Run tests"}]}
+        project = self.db.get_project(self.project["id"])
+        self.db.update_project(project["id"], project["version"], agent_planning_enabled=False)
+        with self.assertRaises(ValidationError):
+            await self.runtime.generate_plan(group, "off")
+        with self.assertRaises(ValidationError):
+            await self.runtime.confirm_plan(group["id"], group["version"], "stale", proposal)
+        project = self.db.get_project(self.project["id"])
+        self.db.update_project(project["id"], project["version"], agent_planning_enabled=True)
+        git.git(str(self.root), "commit", "--allow-empty", "-m", "new baseline")
+        with self.assertRaises(ConflictError):
+            await self.runtime.confirm_plan(group["id"], group["version"], "stale", proposal)
+        self.assertEqual(self.db.children(group["id"]), [])
 
     async def test_unlimited_parallel_claim_and_exclusive_barrier(self):
         tasks = [self.task(str(i)) for i in range(4)]
@@ -199,7 +282,7 @@ class ParallelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plan_generation_explicitly_uses_plan_skill(self):
         group = self.db.create_task(project_id=self.project["id"], title="拆分任务", kind="parallel_group")
-        self.db.save_operation("proposal", group["id"], "plan", "pending")
+        self.db.save_operation("proposal", group["id"], "plan", "pending", context=self.runtime.plan_context(group))
         self.server.start_turn = AsyncMock(return_value="plan-turn")
         self.server.wait_for_turn = AsyncMock(return_value={
             "status": "completed", "output": [{"type": "agentMessage", "text": '{"tasks":[{"key":"a","title":"子任务"}]}'}],
@@ -211,7 +294,7 @@ class ParallelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plan_confirmation_is_atomic_and_never_executes(self):
         group = self.db.create_task(project_id=self.project["id"], title="Group", kind="parallel_group")
-        self.db.save_operation("proposal", group["id"], "plan", "ready")
+        self.db.save_operation("proposal", group["id"], "plan", "ready", context=self.runtime.plan_context(group))
         cycle = {"tasks": [{"key": "a", "title": "A", "blockedByKeys": ["b"]}, {"key": "b", "title": "B", "blockedByKeys": ["a"]}]}
         with self.assertRaises(ValidationError):
             await self.runtime.confirm_plan(group["id"], group["version"], "proposal", cycle)

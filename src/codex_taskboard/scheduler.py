@@ -214,6 +214,9 @@ class Scheduler:
         self._starting_tasks: set[str] = set()
         self._history_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._last_sync = 0.0
+        self._sync_connected = False
+        self._dirty_threads: set[str] = set()
+        self._last_quota_resume = 0.0
         self.parallel = ParallelRuntime(self)
         self.planning = TaskPlanning(self)
         self._answer_lock = asyncio.Lock()
@@ -543,6 +546,8 @@ class Scheduler:
         await self.parallel.dispatch()
 
     async def _resume_quota_tasks(self) -> None:
+        if time.monotonic() - self._last_quota_resume < 5:
+            return
         if isinstance(self.server, DesktopAppServer) and not self.server.available():
             return
         for task in self.db.waiting_quota_tasks():
@@ -561,6 +566,8 @@ class Scheduler:
                 continue
             try:
                 await self.parallel.queue(task, QUOTA_RESUME_PROMPT)
+                self._last_quota_resume = time.monotonic()
+                break  # Ramp up one continuation per interval through normal claims.
             except Exception as exc:
                 self.db.set_parallel(task["id"], quotaRetryAt=time.time() + 5, waitReason=str(exc))
 
@@ -713,12 +720,21 @@ class Scheduler:
 
     async def _sync_threads(self) -> None:
         if isinstance(self.server, DesktopAppServer) and not self.server.available():
+            self._sync_connected = False
             return
+        if not self._sync_connected:
+            self._history_cache.clear()
+            self._sync_connected = True
         for task in self.db.list_tasks():
             if not task["threadId"]:
                 continue
             self.server.register_thread_task(task["threadId"], task["id"])
+            cached = self._history_cache.get(task["threadId"])
+            interval = 60 if task["status"] == "in_progress" else 300
+            if cached and task["threadId"] not in self._dirty_threads and time.monotonic() - cached[0] < interval:
+                continue
             try:
+                self._dirty_threads.discard(task["threadId"])
                 before = self.db.list_activity(task["id"])
                 snapshot = await self.hydrate_activity(task, force=True)
                 current = self.db.get_task(task["id"])
@@ -1180,6 +1196,8 @@ class Scheduler:
             raise ValidationError(f"Task must be {status.value} for this action")
 
     async def _handle_notification(self, method: str, params: dict[str, Any]) -> None:
+        if method in {"thread/status/changed", "turn/started", "turn/completed", "turn/failed"} and params.get("threadId"):
+            self._dirty_threads.add(params["threadId"])
         auxiliary = self.parallel.auxiliary(params)
         turn_id = _identifier(params, "turnId")
         if turn_id and method in {"error", "turn/error", "turn/failed"}:

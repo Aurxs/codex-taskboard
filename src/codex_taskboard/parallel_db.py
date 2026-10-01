@@ -60,7 +60,7 @@ class ParallelDatabase:
         return {
             "kind": row["kind"], "parentId": row["parent_id"],
             "schedulingMode": row["scheduling_mode"], "writeScopes": json.loads(row["write_scopes"]),
-            "targetBranch": row["target_branch"], "parallel": state,
+            "targetBranch": row["target_branch"], "parallel": state, "sharedResources": json.loads(row["shared_resources"]),
             "groupPhase": state.get("groupPhase"), "mergeState": state.get("mergeState", "none"),
             "waitReason": state.get("waitReason"), "queued": bool(queued),
             "plan": self.task_plan(row["id"], state),
@@ -143,8 +143,16 @@ class ParallelDatabase:
             raise ValidationError("请先暂停任务，再调整修改范围")
         if not creating and scopes != task["writeScopes"] and any(op["state"] in {"agent_running", "uncertain", "preparing", "publishing"} for op in self.operations(task["id"], "merge")):
             raise ValidationError("请先暂停任务，再调整修改范围")
+        resources = changes.get("shared_resources", task.get("sharedResources", []))
+        if not isinstance(resources, list) or len(resources) > 32 or any(not isinstance(r, str) or not r.strip() or len(r) > 128 or "\0" in r for r in resources):
+            raise ValidationError("共享资源需要最多 32 个非空名称")
+        resources = sorted(set(r.strip() for r in resources))
+        if kind == "parallel_group" and resources:
+            raise ValidationError("请在子任务上声明共享资源")
+        if not creating and resources != task.get("sharedResources", []) and self._conn.execute("SELECT 1 FROM resource_leases WHERE task_id=?", (task["id"],)).fetchone():
+            raise ValidationError("请先确认暂停并释放占用，再修改共享资源")
         return {"kind": kind, "parent_id": parent_id, "scheduling_mode": mode,
-                "write_scopes": json.dumps(scopes), "target_branch": target,
+                "write_scopes": json.dumps(scopes), "shared_resources": json.dumps(resources), "target_branch": target,
                 **({"execution_mode": "worktree"} if mode == "parallel" or kind == "parallel_group" else {})}
 
     def require_group_editable(self, group_id: str, *, structural=True) -> dict:
@@ -217,6 +225,7 @@ class ParallelDatabase:
         self._conn.execute("DELETE FROM execution_leases WHERE task_id=?", (task_id,))
         if scopes:
             self._conn.execute("DELETE FROM scope_leases WHERE owner_id=?", (task_id,))
+            self._conn.execute("DELETE FROM resource_leases WHERE task_id=?", (task_id,))
 
     def reserve_scopes(self, task: dict) -> str | None:
         root_task = self.get_task(task["parentId"]) if task["parentId"] else task
@@ -246,6 +255,13 @@ class ParallelDatabase:
         if root["kind"] == "parallel_group" and (root["groupPhase"] != "submitted" or (task["parentId"] and root["status"] != "in_progress")):
             return "等待任务组提交执行"
         _, key, _ = self.repo_info(task)
+        # Leases are durable; uncertain executions still count after a restart.
+        # Apply the strictest configured budget across aliases of this repository.
+        budgets = [p["maxConcurrentTasks"] for p in self.list_projects()
+                   if p["maxConcurrentTasks"] and self.repo_info({"projectId": p["id"]})[1] == key]
+        occupied = self._conn.execute("SELECT COUNT(*) FROM execution_leases WHERE repo_key=? AND task_id<>?", (key, task["id"])).fetchone()[0]
+        if task["kind"] != "parallel_group" and budgets and occupied >= min(budgets):
+            return "等待仓库并发预算释放"
         for lease in self._conn.execute("SELECT * FROM execution_leases WHERE repo_key=?", (key,)):
             if lease["task_id"] == task["id"]:
                 if task["runState"] in {"starting", "running", "waiting_input", "waiting_approval"}:
@@ -277,7 +293,20 @@ class ParallelDatabase:
                     and (earlier["kind"] != "parallel_group" or earlier["groupPhase"] == "submitted")
                     and self.repo_info(earlier)[1] == key):
                     return f"等待前序独占任务 {earlier['identifier']}"
-        return self.reserve_scopes(task)
+        resources = sorted({r for child in self.children(root["id"]) for r in child.get("sharedResources", [])}) if root["kind"] == "parallel_group" else task.get("sharedResources", [])
+        requests = [(resource, "global", root["id"]) for resource in resources]
+        if task["parentId"]:
+            requests += [(resource, "group:" + root["id"], task["id"]) for resource in task.get("sharedResources", [])]
+        for resource, namespace, owner_id in requests:
+            owner = self._conn.execute("SELECT task_id FROM resource_leases WHERE resource=? AND namespace=? AND task_id<>?", (resource, namespace, owner_id)).fetchone()
+            if owner:
+                return f"等待共享资源 {resource}（{self.get_task(owner['task_id'])['identifier']}）"
+        reason = self.reserve_scopes(task)
+        if reason:
+            return reason
+        for resource, namespace, owner_id in requests:
+            self._conn.execute("INSERT OR IGNORE INTO resource_leases VALUES(?,?,?)", (resource, namespace, owner_id))
+        return None
 
     def claim_candidate(self, task_id: str, *, expected_version: int | None = None, queued=False) -> dict | None:
         with self.transaction(immediate=True):

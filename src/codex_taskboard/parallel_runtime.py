@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -341,6 +342,8 @@ class ParallelRuntime:
             task = self.db.get_task(task_id)
             if task["mergeState"] not in {"queued", "merging", "merged"}:
                 return
+            if task["mergeState"] == "merged" and task["status"] == "done":
+                return  # Already published and verified; never create another worktree.
             if task["parallel"].get("nativeConflict") or task["parallel"].get("uncertainExecution"):
                 raise ConflictError("回合启动结果待核对，请先确认原生会话状态")
             source = task["parallel"].get("resultCommit")
@@ -367,9 +370,6 @@ class ParallelRuntime:
                 if other["id"] != task_id and other["executionMode"] == "local" and other["status"] == "in_progress" and other["runState"] in {"starting", "running", "waiting_input", "waiting_approval"} and self.db.repo_info(other)[1] == repo_key:
                     raise ConflictError("等待目标工作区中的执行结束")
             target_sha = gw.local_branch(root, target)
-            if gw.is_ancestor(root, source, target_sha):
-                await self.merged(task_id, source, target_sha)
-                return
             op_id = f"merge:{task_id}:{source}:{target_sha}"
             operation = self.db.operation(op_id)
             if operation and operation["state"] in {"blocked", "uncertain"}:
@@ -449,7 +449,29 @@ class ParallelRuntime:
             raise ValidationError("Codex 会话未成功完成，请检查原会话后重试")
         self.db.save_operation(op_id, op["task_id"], op["kind"], "verified_turn", result=result)
 
-    async def publish_merge(self, op_id: str):
+    async def verify_candidate(self, op, result: str):
+        from .verification import run_commands
+        task = self.db.get_task(op["task_id"])
+        commands = self.db.get_project(task["projectId"])["verificationCommands"]
+        if not commands:
+            raise ValidationError("请在项目设置中配置验收命令后重试合并")
+        binding = {"candidateCommit": result, "sourceCommit": op["payload"]["sourceCommit"],
+                   "targetCommit": op["payload"]["targetCommit"], "commands": commands}
+        key = "verification:" + op["id"] + ":" + hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()
+        existing = self.db.operation(key)
+        if existing and existing["state"] == "running":
+            raise ConflictError("验收进程结果未知，请核对原进程后重新准备候选提交")
+        if not existing or existing["state"] != "passed":
+            self.db.save_operation(key, task["id"], "verification", "running", **binding)
+            records = await asyncio.to_thread(run_commands, op["payload"]["worktreeGitRoot"], commands)
+            passed = (len(records) == len(commands) and all(r["exitCode"] == 0 and not r["timedOut"] for r in records)
+                      and gw.commit(op["payload"]["worktreeGitRoot"]) == result and gw.clean(op["payload"]["worktreeGitRoot"]))
+            self.db.save_operation(key, task["id"], "verification", "passed" if passed else "failed", records=records)
+            if not passed:
+                raise ValidationError("候选提交验收失败，请查看验收日志后重试")
+        return binding
+
+    async def publish_merge(self, op_id: str, *, verified=None):
         op = self.db.operation(op_id)
         task = self.db.get_task(op["task_id"])
         data = op["payload"]
@@ -475,6 +497,15 @@ class ParallelRuntime:
             self.db.set_parallel(task["id"], mergeState="queued", waitReason="目标分支已前进，重新准备合并")
             await self.publish(task["id"])
             return
+        if verified is None:
+            binding = await self.verify_candidate(op, result)
+            # Commands can run for minutes. Re-read task state, scopes, source,
+            # baseline and project policy before allowing publication.
+            return await self.publish_merge(op_id, verified=binding)
+        if (verified["candidateCommit"] != result or verified["sourceCommit"] != data["sourceCommit"]
+            or verified["targetCommit"] != data["targetCommit"]
+            or verified["commands"] != self.db.get_project(task["projectId"])["verificationCommands"]):
+            raise ConflictError("候选提交或验收配置已变化，请重新验收")
         self.db.save_operation(op_id, task["id"], "merge", "publishing", resultCommit=result)
         gw.publish(root, data["targetBranch"], data["targetCommit"], result)
         self.db.save_operation(op_id, task["id"], "merge", "completed", resultCommit=result)
@@ -608,6 +639,8 @@ class ParallelRuntime:
                             raise ConflictError("暂停待确认：辅助会话仍在运行")
                     if op["state"] not in {"completed", "confirmed"}:
                         self.db.save_operation(op["id"], op["task_id"], op["kind"], "blocked", error="已暂停")
+            if any(op["task_id"] in ids and op["kind"] == "verification" and op["state"] == "running" for op in self.db.operations()):
+                raise ConflictError("暂停待确认：验收进程仍在运行或结果未知，占用保留")
             if any("group:" + i in self.workers for i in ids):
                 raise ConflictError("暂停待确认：工作树仍在创建，请稍后再次确认暂停")
             for member in members:
@@ -640,14 +673,26 @@ class ParallelRuntime:
         return next((o for o in self.db.operations() if o["kind"] in {"plan", "merge", "task_plan"}
                      and ((thread and o["payload"].get("threadId") == thread) or (turn and o["payload"].get("turnId") == turn))), None)
 
+    def plan_context(self, group: dict) -> dict:
+        workspace = self.db.get_project(group["projectId"])["workspacePath"]
+        if not gw.clean(workspace):
+            raise ConflictError("请先提交或整理仓库改动，再生成或确认拆分草案")
+        children = [{"id": c["id"], "version": c["version"]} for c in self.db.children(group["id"])]
+        return {"groupVersion": group["version"], "baseCommit": gw.commit(workspace),
+                "workspacePath": workspace, "children": children}
+
     async def generate_plan(self, group: dict, request_id: str) -> dict:
         self.db.require_group_editable(group["id"])
+        if not self.db.get_project(group["projectId"])["agentPlanningEnabled"]:
+            raise ValidationError("请先开启 Agent 辅助规划；手动依赖和并行始终可用")
+        if self.db.get_task(group["id"])["version"] != group["version"]:
+            raise ConflictError("任务组已变化，请刷新")
         existing = self.db.operation(request_id)
         if existing:
             if existing["task_id"] != group["id"] or existing["kind"] != "plan":
                 raise ConflictError("操作标识已被其他操作使用")
             return existing
-        self.db.save_operation(request_id, group["id"], "plan", "pending", groupVersion=group["version"])
+        self.db.save_operation(request_id, group["id"], "plan", "pending", context=self.plan_context(group))
         self.spawn("plan:" + request_id, self.run_plan(request_id))
         return self.db.operation(request_id)
 
@@ -657,7 +702,9 @@ class ParallelRuntime:
         try:
             await self.scheduler._ensure_server()
             workspace = self.db.get_project(group["projectId"])["workspacePath"]
-            thread = await self.server.start_thread(workspace)
+            if op["payload"].get("context") != self.plan_context(group):
+                raise ConflictError("仓库或任务组已变化，请重新生成草案")
+            thread = await self.server.start_thread(workspace, read_only=True)
             self.server.register_thread_task(thread, group["id"])
             self.db.save_operation(op_id, group["id"], "plan", "uncertain", threadId=thread)
             prompt = json.dumps({
@@ -698,6 +745,9 @@ class ParallelRuntime:
                 raise ValidationError("草案子任务需要唯一标识和标题")
             if not isinstance(task.get("description", ""), str) or not isinstance(task.get("blockedByKeys", []), list) or not all(isinstance(k, str) for k in task.get("blockedByKeys", [])):
                 raise ValidationError("草案描述或依赖格式不正确")
+            for field in ("parallelReason", "acceptanceCriteria"):
+                if not isinstance(task.get(field, ""), str):
+                    raise ValidationError("并行理由和验收条件必须是文本")
             keys.add(task["key"])
             task["writeScopes"] = gw.normalize_scopes(task.get("writeScopes", []))
         remaining = {t["key"]: set(t.get("blockedByKeys", [])) for t in tasks}
@@ -718,11 +768,17 @@ class ParallelRuntime:
                 return group
             if group["version"] != version or not op or op["task_id"] != group_id or op["kind"] != "plan" or op["state"] != "ready":
                 raise ConflictError("任务组或拆分草案已变化，请刷新后确认")
+            if not self.db.get_project(group["projectId"])["agentPlanningEnabled"]:
+                raise ValidationError("Agent 辅助规划已关闭，草案保留待重新开启后确认")
+            if op["payload"].get("context") != self.plan_context(group):
+                raise ConflictError("仓库或任务组已变化，请重新生成草案")
             tasks = self.validate_proposal(proposal)
             created = {}
             for task in tasks:
                 created[task["key"]] = self.db.create_task(project_id=group["projectId"], parent_id=group_id,
-                    title=task["title"], description=task.get("description", ""), write_scopes=task["writeScopes"])
+                    title=task["title"], description=task.get("description", "") +
+                        ("\n\n并行理由：\n" + task["parallelReason"] if task.get("parallelReason") else "") +
+                        ("\n\n验收条件：\n" + task["acceptanceCriteria"] if task.get("acceptanceCriteria") else ""), write_scopes=task["writeScopes"])
             for task in tasks:
                 child = created[task["key"]]
                 self.db.replace_dependencies(child["id"], child["version"], [created[k]["id"] for k in task.get("blockedByKeys", [])])
@@ -794,6 +850,16 @@ class ParallelRuntime:
             if op["kind"] == "merge":
                 root = data.get("worktreeGitRoot")
                 if root and data.get("resultCommit") and gw.is_ancestor(root, data["resultCommit"], gw.local_branch(root, data["targetBranch"])):
+                    # Publication may have completed just before a crash. Only
+                    # recorded, passing evidence permits completion on recovery.
+                    commands = self.db.get_project(self.db.get_task(task_id)["projectId"])["verificationCommands"]
+                    evidence = [v for v in self.db.operations(task_id, "verification") if v["state"] == "passed"
+                                and v["payload"].get("candidateCommit") == data["resultCommit"]
+                                and v["payload"].get("sourceCommit") == data["sourceCommit"]
+                                and v["payload"].get("targetCommit") == data["targetCommit"]
+                                and v["payload"].get("commands") == commands]
+                    if not commands or not evidence:
+                        raise ConflictError("已发布提交缺少有效验收记录，请重新准备合并并验收")
                     self.db.save_operation(op_id, task_id, "merge", "completed")
                     await self.merged(task_id, data["sourceCommit"], data["resultCommit"])
                 elif root:

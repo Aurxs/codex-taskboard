@@ -5,7 +5,7 @@ import type { ProposedTask, Task, TaskOperation } from "../types";
 import { TaskEditor } from "./TaskEditor";
 import { postEmbeddedHostMessage } from "../embeddedHost.mjs";
 
-export function GroupTasks({ group, onRefresh, onOpen }: { group: Task; onRefresh: () => Promise<void>; onOpen: (task: Task) => void }) {
+export function GroupTasks({ agentPlanningEnabled, group, onRefresh, onOpen }: { agentPlanningEnabled: boolean; group: Task; onRefresh: () => Promise<void>; onOpen: (task: Task) => void }) {
   const [editor, setEditor] = useState<Task | "new" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -33,7 +33,7 @@ export function GroupTasks({ group, onRefresh, onOpen }: { group: Task; onRefres
     <div className="group-tasks-heading"><h2>{t("子任务")}</h2><span>{t("已集成 {0} / {1}", group.progress?.integrated ?? 0, group.progress?.total ?? 0)}</span></div>
     <div className="group-tasks-toolbar">
       <button type="button" className="button secondary" disabled={!editable || busy} onClick={() => setEditor("new")}>{t("添加子任务")}</button>
-      <button type="button" className="button secondary" disabled={!editable || busy || !!latest && ["pending", "agent_running", "uncertain"].includes(latest.state)} onClick={() => void perform(() => generatePlan(group, crypto.randomUUID()))}>{t("AI 拆分")}</button>
+      <button type="button" className="button secondary" disabled={!agentPlanningEnabled || !editable || busy || !!latest && ["pending", "agent_running", "uncertain"].includes(latest.state)} onClick={() => void perform(() => generatePlan(group, crypto.randomUUID()))}>{t("AI 拆分")}</button>
       {!editable && <small>{t("暂停任务组后可调整结构")}</small>}
     </div>
     {!group.children?.length && <p className="activity-empty">{t("添加子任务并设置依赖，整理好后统一提交执行。")}</p>}
@@ -49,12 +49,14 @@ export function GroupTasks({ group, onRefresh, onOpen }: { group: Task; onRefres
       {proposal.map((item, index) => <div className="proposal-task" key={item.key}>
         <input aria-label={t("草案标题 {0}", index + 1)} value={item.title} disabled={!editable || busy} onChange={event => changeProposal(index, { title: event.target.value })} />
         <textarea aria-label={t("草案描述 {0}", index + 1)} rows={2} value={item.description} disabled={!editable || busy} onChange={event => changeProposal(index, { description: event.target.value })} />
+        <textarea aria-label={t("并行理由")} value={item.parallelReason ?? ""} disabled={!editable || busy} onChange={event => changeProposal(index, { parallelReason: event.target.value })} placeholder={t("并行理由")} />
+        <textarea aria-label={t("验收条件")} value={item.acceptanceCriteria ?? ""} disabled={!editable || busy} onChange={event => changeProposal(index, { acceptanceCriteria: event.target.value })} placeholder={t("验收条件")} />
         <details><summary>{t("依赖与修改范围")}</summary>
           {proposal.filter(other => other.key !== item.key).map(other => <label key={other.key} className="proposal-dependency"><input type="checkbox" checked={item.blockedByKeys?.includes(other.key) ?? false} disabled={!editable || busy} onChange={event => changeProposal(index, { blockedByKeys: event.target.checked ? [...(item.blockedByKeys ?? []), other.key] : item.blockedByKeys.filter(key => key !== other.key) })} />{other.title}</label>)}
           <textarea aria-label={t("草案范围 {0}", index + 1)} rows={2} value={(item.writeScopes ?? []).join("\n")} disabled={!editable || busy} placeholder={t("每行一个文件或目录，例如 web/ 或 src/api.py")} onChange={event => changeProposal(index, { writeScopes: event.target.value.split("\n") })} />
         </details>
       </div>)}
-      <button type="button" className="button primary" disabled={!editable || busy} onClick={() => void perform(async () => { await confirmPlan(group, proposalId, proposal); setProposal(null); setProposalId(null); })}>{t("确认加入子任务")}</button>
+      <button type="button" className="button primary" disabled={!agentPlanningEnabled || !editable || busy} onClick={() => void perform(async () => { await confirmPlan(group, proposalId, proposal); setProposal(null); setProposalId(null); })}>{t("确认加入子任务")}</button>
     </div>}
     {error && <p className="form-error" role="alert">{localizeError(error)}</p>}
     {editor && <TaskEditor task={editor === "new" ? null : editor} parent={group} projectId={group.projectId} initialStatus="todo" candidates={group.children ?? []} onClose={() => setEditor(null)}

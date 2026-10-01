@@ -11,6 +11,9 @@
   <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
 </div>
 
+> October compatibility update: [version evidence, sidebar fix, optional planning and verification setup](docs/compatibility-2026-10.md). Managed merges require configured verification commands; Agent planning defaults off.
+
+
 Codex Taskboard is a local task board that runs inside Codex: organize requirements, set prerequisites, and hand them to Codex for execution. The menu bar launcher starts the service and mounts the panel; tasks, execution history, and project settings are stored in a local SQLite database.
 
 This is an independent community project with no affiliation with or endorsement by OpenAI.
@@ -25,7 +28,7 @@ This is an independent community project with no affiliation with or endorsement
 | --- | --- |
 | Customizable board | Todo and In progress always stay visible; toggle In review, Done, and Canceled under Visible tabs, with Canceled on the far right; display preferences are saved locally |
 | Task dependencies | Set prerequisite tasks; a task enters the execution flow after its blockers are cleared |
-| Parallel scheduling | Opt ordinary tasks into parallel execution or configure dependent subtasks in a group; no concurrency cap |
+| Parallel scheduling | Opt ordinary tasks into parallel execution or configure dependent subtasks in a group; optional repository concurrency budget |
 | Automation toggles | Auto-claim is off by default, and human review is on by default |
 | Usage-limit continuation | Automatic continuation after usage limits is enabled by default; you can disable it per project and manually resume the original thread |
 | Execution options | Reuse the Codex session by default, or choose a model and reasoning effort for each task |
@@ -53,7 +56,7 @@ Review task properties, execution stage, dependencies, and run history in one pl
 
 Ordinary tasks and subtasks that are running, in review, or completed have a pinned follow-up composer in the left detail panel. Messages steer an active turn or continue the same thread after completion. Enter sends; Shift+Enter adds a line; failed sends retain the draft. Long descriptions and history scroll independently. “Open in Codex” opens the native conversation; native follow-up messages, replies, and turn status sync back to the board.
 
-Normal development and packaged launches share the desktop's existing App Server without synthetic native notifications or changes to its composer. Live events are backed by a latest-turn check every five seconds. Legacy task pause returns to draft; managed parallel tasks preserve their delivery state and require confirmed interruption before releasing reservations. Restart the launcher after upgrading to load these changes. Backend-only / no-injector diagnostic modes retain an isolated stdio server and do not provide native bidirectional sync.
+Normal development and packaged launches share the desktop's existing App Server without synthetic native notifications or changes to its composer. Live events are backed by periodic reconciliation; full history is loaded on demand. Legacy task pause returns to draft; managed parallel tasks preserve their delivery state and require confirmed interruption before releasing reservations. Restart the launcher after upgrading to load these changes. Backend-only / no-injector diagnostic modes retain an isolated stdio server and do not provide native bidirectional sync.
 
 Before starting or steering a task turn through the desktop connection, Taskboard registers the native browser route for that conversation so enabled in-app browser tools can run without first opening the native conversation. Codex continues to manage browser plugins, site permissions, and approvals. Isolated stdio diagnostic modes do not provide this desktop browser integration.
 
@@ -63,7 +66,7 @@ Ordinary exclusive tasks offer the current project directory or a new worktree. 
 
 ### Parallel execution and groups
 
-Ordinary tasks default to exclusive execution. Choose “Allow parallel” before the first start to use an isolated native Codex worktree and conversation. All eligible tasks can run; there is no execution-count limit or setting. Projects backed by the same Git common directory share exclusivity and scope reservations. A ready exclusive task stops later parallel tasks from overtaking it while existing executions drain; unmet dependencies do not create a barrier.
+Ordinary tasks default to exclusive execution. Choose “Allow parallel” before the first start to use an isolated native Codex worktree and conversation. Eligible tasks share the configured repository concurrency budget (zero means unlimited). Projects backed by the same Git common directory share exclusivity and scope reservations. A ready exclusive task stops later parallel tasks from overtaking it while existing executions drain; unmet dependencies do not create a barrier.
 
 Create a parallel group, then add subtasks in its details. Declare dependencies and optional write scopes, or generate an AI decomposition draft and edit it before confirming. Draft generation never changes the execution graph or starts implementation. Submit a group with at least one valid subtask; with auto-claim disabled, run the submitted group manually. One nesting level is supported. Subtasks depend on members of their own group; top-level cards express dependencies between groups. The parent has no implementation Agent.
 
