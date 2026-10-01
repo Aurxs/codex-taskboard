@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import base64
 import ctypes
-from ctypes import wintypes
 import json
 import ntpath
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
+from ctypes import wintypes
+from pathlib import Path
 
 from . import hidden_process_options
 
@@ -24,7 +24,7 @@ def powershell(script: str, *, environment: dict | None = None, timeout: float =
     ).encode("utf-16-le")).decode("ascii")
     executable = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     return subprocess.run([str(executable), "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", encoded],
-                          env={**os.environ, **(environment or {})}, capture_output=True,
+                          env={**os.environ, **(environment or {})}, check=False, capture_output=True,
                           text=True, encoding="utf-8", timeout=timeout, **hidden_process_options())
 
 

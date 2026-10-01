@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from codex_taskboard.platforms import executable_command  # noqa: E402
-from build_sidecar import build, native_target  # noqa: E402
-from check_sidecar_smoke import smoke  # noqa: E402
+from build_sidecar import build, native_target
+from check_sidecar_smoke import smoke
+
+from codex_taskboard.platforms import executable_command
 
 
 def main() -> int:

@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import plistlib
 import subprocess
 import sys
+from pathlib import Path
 
 CODEX_APP_CANDIDATES = (
     "/Applications/ChatGPT.app", "~/Applications/ChatGPT.app",
@@ -34,8 +34,8 @@ def discover_app() -> Path | None:
             [
                 "/usr/bin/mdfind",
                 "-0",
-                "kMDItemContentType == 'com.apple.application-bundle' && "
-                "(kMDItemFSName == 'ChatGPT.app' || kMDItemFSName == 'Codex.app')",
+                ("kMDItemContentType == 'com.apple.application-bundle' && "
+                 "(kMDItemFSName == 'ChatGPT.app' || kMDItemFSName == 'Codex.app')"),
             ],
             check=False,
             capture_output=True,
@@ -103,7 +103,7 @@ def confirm_restart(app: Path, chinese: bool) -> bool:
     cancel, restart = ("取消", "重新启动 Codex") if chinese else ("Cancel", "Restart Codex")
     message = "需要重新启动 Codex 才能显示任务面板。" if chinese else "Restart Codex to show Taskboard."
     script = f'display dialog "{message}" buttons {{"{cancel}", "{restart}"}} default button "{restart}" with title "Codex Taskboard"'
-    result = subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, text=True)
+    result = subprocess.run(["/usr/bin/osascript", "-e", script], check=False, capture_output=True, text=True)
     return result.returncode == 0 and restart in result.stdout
 
 
