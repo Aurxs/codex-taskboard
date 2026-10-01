@@ -187,7 +187,7 @@ function ProjectSettingsMenu({
         <div className="project-automation-menu no-drag" role="dialog" aria-label={t("自动认领设置")}>
           <div className="project-automation-menu-heading"><strong>{t("自动认领待办")}</strong><span className={project.automationEnabled ? "is-active" : "is-paused"}>{project.automationEnabled ? t("运行中") : t("已暂停")}</span></div>
           <Switch checked={project.agentPlanningEnabled} label={t("Agent 辅助规划")} description={t("只读分析生成草案，确认后使用同一调度器；关闭不停止运行任务。")} onChange={value => onChange("agentPlanningEnabled", value)} />
-          <ExecutionPolicy project={project} onChange={onChange} />
+          <ExecutionPolicy key={project.id} project={project} onChange={onChange} />
           <Switch checked={project.automationEnabled} label={t("自动认领开关")} description={t("就绪后自动执行")} onChange={(value) => onChange("automationEnabled", value)} />
           <Switch checked={project.reviewRequired} label={t("人工审阅")} description={t("完成后等你确认")} onChange={(value) => onChange("reviewRequired", value)} />
           <Switch checked={project.quotaAutoResumeEnabled} label={t("额度恢复自动续跑")} description={t("额度恢复后继续原 thread")} onChange={(value) => onChange("quotaAutoResumeEnabled", value)} />

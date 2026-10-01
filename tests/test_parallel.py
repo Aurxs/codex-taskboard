@@ -111,6 +111,25 @@ class ParallelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task["mergeState"], "blocked")
         self.assertEqual(git.commit(str(self.root)), base)
 
+    async def test_group_reserves_resources_through_final_integration(self):
+        group = self.db.create_task(project_id=self.project["id"], title="Group", kind="parallel_group")
+        child = self.db.create_task(project_id=self.project["id"], parent_id=group["id"], title="Child", shared_resources=["db:shared"])
+        external = self.task("external", shared_resources=["db:shared"])
+        await self.runtime.action(self.db.get_task(group["id"]), "group_submit")
+        await self.runtime.workers["group:" + group["id"]]
+        child = await self.approve_merge(await self.result(child))
+        self.assertEqual(child["status"], "done")
+        self.assertIsNone(self.db.claim_candidate(external["id"]))
+        group = await self.approve_merge(self.db.get_task(group["id"]))
+        self.assertEqual(group["status"], "done")
+        self.assertIsNotNone(self.db.claim_candidate(external["id"]))
+
+    async def test_cannot_add_unreserved_resource_to_running_task(self):
+        task = self.task()
+        task = self.db.claim_task(task["id"], task["version"])
+        with self.assertRaises(ValidationError):
+            self.db.update_task(task["id"], task["version"], shared_resources=["port:3000"])
+
     async def test_shared_resource_is_global_and_retained_until_release(self):
         first = self.task("browser user", shared_resources=["browser:main", "port:3000"])
         second = self.task("browser waiter", shared_resources=["browser:main"])

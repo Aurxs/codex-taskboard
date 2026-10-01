@@ -149,8 +149,12 @@ class ParallelDatabase:
         resources = sorted(set(r.strip() for r in resources))
         if kind == "parallel_group" and resources:
             raise ValidationError("请在子任务上声明共享资源")
-        if not creating and resources != task.get("sharedResources", []) and self._conn.execute("SELECT 1 FROM resource_leases WHERE task_id=?", (task["id"],)).fetchone():
-            raise ValidationError("请先确认暂停并释放占用，再修改共享资源")
+        if not creating and resources != task.get("sharedResources", []):
+            if task.get("parentId"):
+                self.require_group_editable(task["parentId"])
+            if (task.get("queued") or (task.get("status") == "in_progress" and not task.get("parallel", {}).get("paused"))
+                or self._conn.execute("SELECT 1 FROM resource_leases WHERE task_id=?", (task["id"],)).fetchone()):
+                raise ValidationError("请先确认暂停并释放占用，再修改共享资源")
         return {"kind": kind, "parent_id": parent_id, "scheduling_mode": mode,
                 "write_scopes": json.dumps(scopes), "shared_resources": json.dumps(resources), "target_branch": target,
                 **({"execution_mode": "worktree"} if mode == "parallel" or kind == "parallel_group" else {})}
